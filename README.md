@@ -1,0 +1,44 @@
+# NewAPI Check-in Pages
+
+独立的公开配置前端。这个仓库只托管网页，不包含签到程序、真实账号配置、
+`.env`、PAT、Actions Secrets 或原私有仓库的 Git 历史。
+
+## 启用免费 GitHub Pages
+
+1. 将本目录作为全新的公开仓库推送到 GitHub，不要 fork 或公开原私有仓库。
+2. 在公开仓库的 `Settings` → `Pages` 中，将 Source 设为 **GitHub Actions**。
+3. 在 `Actions` 手动运行 **Deploy configuration UI to GitHub Pages**，选择默认分支。
+4. 部署成功后打开 Pages 站点的 `/config_generator.html`，无需运行本地服务。
+
+部署只发布 `scripts/build_pages.py` 中的静态文件白名单，不上传整个仓库。
+首次部署前需先设置 Pages 来源；后续网页更新会自动部署。
+
+## 修改私有配置仓库
+
+1. 打开配置页的「保存到 GitHub」面板。
+2. 填写原来的**私有配置仓库** `owner/repo`，不是这个公开前端仓库。
+3. 输入仅授权私有配置仓库的 Fine-grained PAT，授予 Contents、Workflows、
+   Secrets 的 Read and write 权限；组织仓库可能需要管理员批准。
+4. 先「从 GitHub 加载」，再添加账号并填写新增或更新的令牌。
+5. 确认保存，自动合并账号 JSON、更新两个签到工作流并加密上传账号 Secrets。
+
+PAT 不写入网页源码、项目文件或浏览器存储。浏览器直连 GitHub API，
+加密库随站点发布，不经过第三方代理。仅在自己控制的可信页面输入凭证。
+远端私有仓库需要已有 `accounts.config.json` 和两个签到工作流。
+
+## 可选 `.env` 托管
+
+默认关闭，只有勾选并确认后才读取和更新目标**私有仓库**的 `.env`。
+首次上传可主动选择设备上的 `.env` 模板；不选择则按表单中的账号变量创建。
+已有远端 `.env` 时保留其他变量。私有仓库仍有权限、凭证泄露和明文历史风险。
+不要将 `.env` 提交到本公开仓库。Pages 无法回写设备文件，调试时自行拉取私有仓库。
+
+## 更新前端
+
+在原项目使用 `python3 scripts/export_pages_repo.py --output ../新导出目录`，
+将新导出目录内的白名单文件更新到本仓库。不要复制原仓库目录或 `.git`。
+本仓库不运行签到；旧 WebDAV 和余额看板不具备本地代理能力。
+
+## 许可
+
+项目遵循 MIT 许可，见 `LICENSE`。libsodium 的许可和固定版本校验值见 `vendor/`。

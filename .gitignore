@@ -1,0 +1,15 @@
+.env
+.env.*
+**/.env
+**/.env.*
+*.env
+*.env.*
+*.bak
+*.backup
+*~
+accounts.config*.json
+**/accounts.config*.json
+_site/
+__pycache__/
+*.py[cod]
+.DS_Store
