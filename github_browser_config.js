@@ -5,7 +5,7 @@ globalThis.GitHubBrowserConfig = (() => {
     const reservedNames = new Set([
         'NEWAPI_CONFIG_FILE', 'NEWAPI_ACCOUNTS', 'CONFIG_URL', 'CONFIG_AUTH', 'NOTIFY_ONLY_FAILURE',
         'PATH', 'HOME', 'PYTHONPATH', 'PYTHONHOME', 'LD_PRELOAD', 'LD_LIBRARY_PATH', 'BASH_ENV', 'ENV',
-        'DINGTALK_WEBHOOK', 'DINGTALK_SECRET', 'SERVERCHAN_SENDKEY', 'EMAIL_SMTP_HOST',
+        'DINGTALK_WEBHOOK', 'DINGTALK_SECRET', 'SERVERCHAN_SENDKEY', 'PUSHPLUS_TOKEN', 'EMAIL_SMTP_HOST',
         'EMAIL_SMTP_PORT', 'EMAIL_USER', 'EMAIL_PASS', 'EMAIL_TO', 'EMAIL_FROM'
     ]);
 
@@ -85,31 +85,174 @@ globalThis.GitHubBrowserConfig = (() => {
         return line.length - line.trimStart().length;
     }
 
+    function workflowSteps(lines) {
+        const steps = [];
+        for (let header = 0; header < lines.length; header += 1) {
+            if (!/^\s+steps:\s*(?:#[^\r\n]*)?\r?\n?$/.test(lines[header])) continue;
+            const headerIndent = indentation(lines[header]);
+            let end = header + 1;
+            while (end < lines.length && (!lines[end].trim() || lines[end].trimStart().startsWith('#')
+                    || indentation(lines[end]) > headerIndent
+                    || (indentation(lines[end]) === headerIndent && /^\s+-\s/.test(lines[end])))) end += 1;
+            let stepIndent;
+            let start;
+            for (let index = header + 1; index < end; index += 1) {
+                if (!/^\s+-\s/.test(lines[index])) continue;
+                if (stepIndent === undefined) stepIndent = indentation(lines[index]);
+                if (indentation(lines[index]) !== stepIndent) continue;
+                if (start !== undefined) steps.push({start, end: index, indent: stepIndent});
+                start = index;
+            }
+            if (start !== undefined) steps.push({start, end, indent: stepIndent});
+            header = end - 1;
+        }
+        return steps;
+    }
+
+    function stepField(lines, step, key) {
+        const pattern = new RegExp(`^ {${step.indent + 2}}${key}:\\s*(.*?)\\s*$`);
+        for (let index = step.start; index < step.end; index += 1) {
+            const line = index === step.start ? lines[index].replace(/^(\s*)-\s/, '$1  ') : lines[index];
+            const matched = line.match(pattern);
+            if (matched) return {index, value: matched[1]};
+        }
+        return null;
+    }
+
+    function pushplusOptions(payload) {
+        const config = payload.notifications;
+        if (config === undefined) return {mode: 'preserve', only_failure: false};
+        if (!config || typeof config !== 'object' || Array.isArray(config)
+                || Object.keys(config).some(key => key !== 'pushplus')) throw new Error('结果推送配置格式错误');
+        const pushplus = config.pushplus;
+        if (!pushplus || typeof pushplus !== 'object' || Array.isArray(pushplus)
+                || Object.keys(pushplus).some(key => !['mode', 'only_failure'].includes(key))
+                || !['preserve', 'enable', 'disable'].includes(pushplus.mode)
+                || typeof pushplus.only_failure !== 'boolean') throw new Error('PushPlus 保存方式或失败推送选项无效');
+        return pushplus;
+    }
+
+    function pushplusStep(stepIndent, identifier, notificationIdentifier, onlyFailure, newline) {
+        const script = [
+            'import json',
+            'import os',
+            'import urllib.error',
+            'import urllib.request',
+            '',
+            'class NoRedirect(urllib.request.HTTPRedirectHandler):',
+            '    def redirect_request(self, request, response, code, message, headers, new_url):',
+            '        return None',
+            '',
+            'token = os.environ.get("PUSHPLUS_TOKEN", "").strip()',
+            'if not token:',
+            '    raise SystemExit("PUSHPLUS_TOKEN is missing; configure the Actions Secret.")',
+            'outcome = os.environ["CHECKIN_OUTCOME"]',
+            'status = "成功" if outcome == "success" else "失败"',
+            'run_url = "{}/{}/actions/runs/{}".format(os.environ["GITHUB_SERVER_URL"], os.environ["GITHUB_REPOSITORY"], os.environ["GITHUB_RUN_ID"])',
+            'content = "签到任务：{}\\n仓库：{}\\n工作流：{}\\n任务：{}\\n分支：{}\\n详情：{}".format(status, os.environ["GITHUB_REPOSITORY"], os.environ["GITHUB_WORKFLOW"], os.environ["GITHUB_JOB"], os.environ["GITHUB_REF_NAME"], run_url)',
+            'payload = json.dumps({"token": token, "title": "NewAPI 签到任务" + status, "content": content, "template": "txt"}, ensure_ascii=False).encode("utf-8")',
+            'request = urllib.request.Request("https://www.pushplus.plus/send", data=payload, headers={"Content-Type": "application/json"}, method="POST")',
+            'try:',
+            '    opener = urllib.request.build_opener(NoRedirect())',
+            '    with opener.open(request, timeout=30) as response:',
+            '        result = json.loads(response.read(65536).decode("utf-8"))',
+            'except (urllib.error.URLError, ValueError, OSError):',
+            '    raise SystemExit("PushPlus request failed; check the service and network. No automatic retry was sent.")',
+            'if not isinstance(result, dict) or result.get("code") != 200:',
+            '    raise SystemExit("PushPlus did not accept the notification; check the token and service limits.")',
+            'print("PushPlus accepted the notification; delivery is managed by PushPlus.")'
+        ];
+        const outcome = `steps['${identifier}'].outcome`;
+        const condition = onlyFailure ? `${outcome} == 'failure'`
+            : `(${outcome} == 'success' || ${outcome} == 'failure')`;
+        const lines = [
+            '- name: PushPlus result notification (Pages)',
+            `  id: ${notificationIdentifier}`,
+            `  if: \${{ !cancelled() && ${condition} }}`,
+            '  continue-on-error: true',
+            '  timeout-minutes: 2',
+            '  shell: bash',
+            '  env:',
+            '    PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}',
+            `    CHECKIN_OUTCOME: \${{ ${outcome} }}`,
+            '  run: |',
+            "    python3 - <<'NEWAPI_PUSHPLUS_PY'",
+            ...script.map(line => '    ' + line),
+            '    NEWAPI_PUSHPLUS_PY'
+        ];
+        return lines.map(line => ' '.repeat(stepIndent) + line + newline).join('');
+    }
+
+    function updatePushplusWorkflow(content, options) {
+        if (options.mode === 'preserve') return content;
+        const lines = contentLines(content);
+        const newline = content.includes('\r\n') ? '\r\n' : '\n';
+        for (const step of workflowSteps(lines).reverse()) {
+            const identifier = stepField(lines, step, 'id')?.value;
+            const name = stepField(lines, step, 'name')?.value;
+            if (identifier?.startsWith('newapi_pages_pushplus_') && name === 'PushPlus result notification (Pages)') {
+                lines.splice(step.start, step.end - step.start);
+            }
+        }
+        if (options.mode === 'disable') return lines.join('');
+        const steps = workflowSteps(lines);
+        const identifiers = new Set(steps.map(step => stepField(lines, step, 'id')?.value).filter(Boolean));
+        const checkinSteps = steps.filter(step => /\bcheckin\.py\b/.test(stepField(lines, step, 'run')?.value || ''));
+        if (!checkinSteps.length) throw new Error('PushPlus 需要单行 run: ... checkin.py 的签到步骤；本次尚未写入任何文件或 Secrets');
+        let sequence = 1;
+        for (const step of checkinSteps.reverse()) {
+            let identifier = stepField(lines, step, 'id')?.value;
+            if (identifier && !/^[A-Za-z_][A-Za-z0-9_-]*$/.test(identifier)) {
+                throw new Error('签到步骤 ID 必须是普通标识符，无法安全配置 PushPlus');
+            }
+            if (!identifier) {
+                while (identifiers.has(`newapi_pages_checkin_${sequence}`)) sequence += 1;
+                identifier = `newapi_pages_checkin_${sequence++}`;
+            }
+            let notificationIdentifier = 'newapi_pages_pushplus_' + identifier;
+            let suffix = 2;
+            while (identifiers.has(notificationIdentifier)) {
+                notificationIdentifier = `newapi_pages_pushplus_${identifier}_${suffix++}`;
+            }
+            if (step.end && !/[\r\n]$/.test(lines[step.end - 1])) lines[step.end - 1] += newline;
+            lines.splice(step.end, 0, pushplusStep(step.indent, identifier, notificationIdentifier, options.only_failure, newline));
+            if (!stepField(lines, step, 'id')) {
+                lines.splice(step.end, 0, ' '.repeat(step.indent + 2) + `id: ${identifier}${newline}`);
+            }
+            identifiers.add(identifier);
+            identifiers.add(notificationIdentifier);
+        }
+        return lines.join('');
+    }
+
     function updateWorkflow(content, previousNames, currentNames) {
         const lines = contentLines(content);
-        const runIndexes = lines.flatMap((line, index) => /^\s+run:.*\bcheckin\.py\b/.test(line) ? [index] : []);
-        if (!runIndexes.length) throw new Error('工作流中未找到单行 run: ... checkin.py，未修改文件');
+        const steps = workflowSteps(lines).filter(step => /\bcheckin\.py\b/.test(stepField(lines, step, 'run')?.value || ''));
+        if (!steps.length) throw new Error('工作流中未找到单行 run: ... checkin.py，未修改文件');
         const managed = new Set([...previousNames, ...currentNames]);
         const newline = content.includes('\r\n') ? '\r\n' : '\n';
-        for (const runIndex of runIndexes.reverse()) {
-            const runIndent = indentation(lines[runIndex]);
-            const stepPattern = new RegExp(`^ {${runIndent - 2}}-\\s`);
-            let stepStart = runIndex - 1;
-            while (stepStart >= 0 && !stepPattern.test(lines[stepStart])) stepStart -= 1;
-            if (stepStart < 0) throw new Error('无法识别签到工作流的步骤边界');
-            let stepEnd = runIndex + 1;
-            while (stepEnd < lines.length && !stepPattern.test(lines[stepEnd])) stepEnd += 1;
+        for (const step of steps.reverse()) {
+            const runIndex = stepField(lines, step, 'run').index;
+            const runIndent = step.indent + 2;
+            const stepStart = step.start;
+            const stepEnd = step.end;
             const envPattern = new RegExp(`^ {${runIndent}}env:`);
             const envIndexes = [];
             for (let index = stepStart; index < stepEnd; index += 1) {
-                if (envPattern.test(lines[index])) envIndexes.push(index);
+                const line = index === stepStart ? lines[index].replace(/^(\s*)-\s/, '$1  ') : lines[index];
+                if (envPattern.test(line)) envIndexes.push(index);
             }
             const generated = currentNames.map(name => `${' '.repeat(runIndent + 2)}${name}: \${{ secrets.${name} }}${newline}`);
             if (!envIndexes.length) {
-                lines.splice(runIndex, 0, `${' '.repeat(runIndent)}env:${newline}`, ...generated);
+                if (runIndex === stepStart) {
+                    if (!/[\r\n]$/.test(lines[stepEnd - 1])) lines[stepEnd - 1] += newline;
+                    lines.splice(stepEnd, 0, `${' '.repeat(runIndent)}env:${newline}`, ...generated);
+                } else lines.splice(runIndex, 0, `${' '.repeat(runIndent)}env:${newline}`, ...generated);
                 continue;
             }
-            if (envIndexes.length !== 1 || !/^\s+env:\s*(?:#[^\r\n]*)?\r?\n?$/.test(lines[envIndexes[0]])) {
+            const envHeader = envIndexes[0] === stepStart
+                ? lines[stepStart].replace(/^(\s*)-\s/, '$1  ') : lines[envIndexes[0]];
+            if (envIndexes.length !== 1 || !/^\s+env:\s*(?:#[^\r\n]*)?\r?\n?$/.test(envHeader)) {
                 throw new Error('签到步骤的 env 必须是普通 YAML 映射，未修改文件');
             }
             const envIndex = envIndexes[0];
@@ -357,14 +500,17 @@ globalThis.GitHubBrowserConfig = (() => {
             }
             if (flags.include_env && payload.confirm_plaintext_env !== true) throw new Error('必须明确确认将明文 .env 写入 Git 历史的风险');
             if (flags.include_env && !snapshot.privateRepository) throw new Error('禁止向公开仓库提交 .env；仅允许明确确认后的私有仓库');
+            const pushplus = pushplusOptions(payload);
+            if (pushplus.mode === 'enable' && !flags.sync_secrets) throw new Error('启用 PushPlus 必须勾选自动同步 Actions Secrets，Token 只通过加密 Secret 保存');
             const incoming = validateAccounts(payload.accounts);
             if (!incoming.length) throw new Error('至少需要配置一个账号');
             const existing = await readAccounts(snapshot);
             const accounts = mergeAccounts(existing, incoming, payload.mode === undefined ? 'merge' : payload.mode);
             const names = envNames(accounts);
+            const secretNames = pushplus.mode === 'enable' ? [...names, 'PUSHPLUS_TOKEN'] : names;
             const inputValues = payload.secrets ?? {};
             if (!inputValues || typeof inputValues !== 'object' || Array.isArray(inputValues)
-                    || Object.keys(inputValues).some(name => !names.includes(name))) throw new Error('凭证只能对应当前账号的环境变量名');
+                    || Object.keys(inputValues).some(name => !secretNames.includes(name))) throw new Error('凭证只能对应当前账号的环境变量名或本次启用的 PUSHPLUS_TOKEN');
             const providedValues = Object.create(null);
             for (const [name, rawValue] of Object.entries(inputValues)) {
                 if (typeof rawValue !== 'string' || new TextEncoder().encode(rawValue).length > 48 * 1024) throw new Error('令牌必须是小于 48 KB 的文本');
@@ -376,7 +522,7 @@ globalThis.GitHubBrowserConfig = (() => {
             for (const path of workflowFiles) {
                 const content = await snapshot.read(path);
                 if (content === null) throw new Error('远端缺少签到工作流，请先将项目代码推送到仓库');
-                files.set(path, updateWorkflow(content, envNames(existing), names));
+                files.set(path, updatePushplusWorkflow(updateWorkflow(content, envNames(existing), names), pushplus));
             }
             if (flags.include_env) {
                 const remoteEnv = await snapshot.read('.env');
@@ -396,8 +542,8 @@ globalThis.GitHubBrowserConfig = (() => {
                 names.forEach(name => {
                     if (!existingSecrets.has(name) && !secretValues[name] && hostedValues[name]) secretValues[name] = hostedValues[name];
                 });
-                const missing = names.filter(name => !existingSecrets.has(name) && !secretValues[name]);
-                if (missing.length) throw new Error('新账号缺少 Secret，请填写令牌：' + missing.join('、'));
+                const missing = secretNames.filter(name => !existingSecrets.has(name) && !secretValues[name]);
+                if (missing.length) throw new Error('缺少 Actions Secret，请填写对应令牌：' + missing.join('、') + '。本次尚未写入任何文件或 Secrets。');
                 encrypted = await encryptSecrets(client, secretValues);
             }
             if (flags.include_env && (await client.request('GET')).private !== true) throw new Error('仓库已变为公开，已取消 .env 上传；请检查仓库可见性后重试');
@@ -425,6 +571,6 @@ globalThis.GitHubBrowserConfig = (() => {
         }
     }
 
-    return Object.freeze({handle, validateAccounts, mergeAccounts, envNames, updateWorkflow,
+    return Object.freeze({handle, validateAccounts, mergeAccounts, envNames, updateWorkflow, updatePushplusWorkflow,
         envValues, updateEnvContent, encryptSecrets});
 })();

@@ -4205,6 +4205,29 @@
                     <input type="file" id="github-env-import" autocomplete="off">
                     <small>只有勾选托管并确认保存后才读取。远端没有 .env 时使用此文件；不选择则仅用表单令牌创建。已有远端 .env 时保留其内容，此文件不生效。内容不显示、不保存到浏览器存储。</small>
                 </div>
+                <h4>📨 结果推送 · PushPlus</h4>
+                <p class="account-table-help">保存后由签到工作流直接调用 PushPlus，推送签到步骤成功 / 失败状态和 Actions 日志链接，不发送账号令牌或完整日志。这里配置的是任务级结果，不是逐账号余额或签到明细。</p>
+                <div class="form-group">
+                    <label for="github-pushplus-mode">PushPlus 保存方式</label>
+                    <select id="github-pushplus-mode" class="github-pushplus-control">
+                        <option value="preserve">保留现有推送设置（默认，不修改）</option>
+                        <option value="enable">启用 / 更新 PushPlus 任务结果推送</option>
+                        <option value="disable">关闭本页面添加的 PushPlus 推送</option>
+                    </select>
+                    <small>关闭只移除本页面添加的步骤，不删除 Secret，也不影响其他通知渠道。再次启用时请重新选择推送范围。</small>
+                </div>
+                <div id="github-pushplus-fields" hidden>
+                    <div class="form-group">
+                        <label for="github-pushplus-token">PushPlus Token</label>
+                        <input type="password" id="github-pushplus-token" class="github-pushplus-control" placeholder="首次填写；留空保留已有 PUSHPLUS_TOKEN Secret" autocomplete="off" spellcheck="false" disabled>
+                        <small>在 <a href="https://www.pushplus.plus/" target="_blank" rel="noopener noreferrer">PushPlus 官网</a>获取 Token。必须勾选自动同步 Secrets；仅加密保存为 PUSHPLUS_TOKEN，不写入账号 JSON、工作流明文、.env 或浏览器存储。</small>
+                    </div>
+                    <div class="github-options">
+                        <label><input type="checkbox" id="github-pushplus-only-failure" class="github-pushplus-control" disabled><span>仅签到步骤失败时推送（未勾选则成功 / 失败均推送；被取消或跳过的任务不发送）</span></label>
+                    </div>
+                    <p class="account-table-help">推送失败不改变签到步骤结果。PushPlus 接口接受消息不代表已送达，送达情况和额度请在服务端查看。若签到程序将部分账号失败作为正常退出，步骤仍显示成功；逐账号结果以日志为准。</p>
+                </div>
+                <p id="github-pushplus-local-note" class="account-table-help" hidden>本地 /github-config 后端尚不支持此新配置；请通过 HTTPS Pages 页面设置 PushPlus。</p>
                 <div class="tips">
                     <h4>🔒 安全与同步说明</h4>
                     <ul>
