@@ -9,6 +9,8 @@ PUBLIC_FILES = (
     'index.html',
     'config_generator.html',
     'dashboard.html',
+    'account_table.js',
+    'account_table.css',
     'github_config_ui.js',
     'github_browser_config.js',
     'vendor/libsodium.js',

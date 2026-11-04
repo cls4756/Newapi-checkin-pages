@@ -2483,6 +2483,7 @@
         };
     })();
 </script>
+    <link rel="stylesheet" href="account_table.css">
 </head>
 <body>
 <button id="themeToggle" class="theme-toggle" onclick="toggleTheme()" title="切换深色 / 浅色主题">🌙</button>
@@ -4029,10 +4030,110 @@
                     <span id="cors-notice-tips" style="color: #94a3b8;">如遇连接失败，推荐优先在云端同步中启用 <strong>CORS 代理</strong>。</span>
                 </div>
             </div>
-            <div id="sites-container"></div>
+            <section class="account-table-panel" aria-labelledby="account-table-title">
+                <div class="account-table-heading">
+                    <div>
+                        <h2 id="account-table-title">账号管理</h2>
+                        <p id="account-count" aria-live="polite">0 个账号 · 0 个站点</p>
+                    </div>
+                    <button type="button" class="btn btn-primary" id="account-add">➕ 添加账号</button>
+                </div>
+                <div class="account-table-toolbar">
+                    <label class="account-search-field">
+                        <input type="search" id="account-search" aria-label="搜索账号" placeholder="搜索站点、备注、用户 ID 或变量名">
+                    </label>
+                    <label>每页
+                        <select id="account-page-size" aria-label="每页账号数">
+                            <option value="10">10 条</option>
+                            <option value="25">25 条</option>
+                            <option value="50">50 条</option>
+                            <option value="100">100 条</option>
+                        </select>
+                    </label>
+                </div>
+                <div class="account-table-scroll" tabindex="0" role="region" aria-label="账号列表，可横向滚动">
+                    <table class="account-table">
+                        <thead><tr><th scope="col">序号</th><th scope="col">站点</th><th scope="col">备注</th><th scope="col">用户 ID</th><th scope="col">令牌变量名</th><th scope="col">新令牌</th><th scope="col">操作</th></tr></thead>
+                        <tbody id="account-table-body"></tbody>
+                    </table>
+                </div>
+                <div class="account-table-pagination">
+                    <span id="account-page-info" aria-live="polite"></span>
+                    <div>
+                        <button type="button" class="btn btn-secondary btn-xs" id="account-page-previous">上一页</button>
+                        <button type="button" class="btn btn-secondary btn-xs" id="account-page-next">下一页</button>
+                    </div>
+                </div>
+                <p class="account-table-help">增删改只更新当前草稿。搜索和分页不影响完整配置的保存。删除远端账号或修改站点 / 用户 ID 时，请先加载完整列表，再选择「替换账号列表」保存到 GitHub。</p>
+                <p id="account-table-status" class="account-table-status" role="status"></p>
+            </section>
+
+            <dialog id="account-editor" class="account-editor" aria-labelledby="account-editor-title">
+                <form id="account-editor-form" novalidate autocomplete="off">
+                    <div class="account-editor-heading">
+                        <h2 id="account-editor-title">添加账号</h2>
+                        <button type="button" id="account-editor-close" class="btn btn-secondary btn-xs" aria-label="关闭账号编辑">✕</button>
+                    </div>
+                    <div class="account-editor-grid">
+                        <div class="form-group account-editor-wide">
+                            <label for="account-field-url">站点 URL <span class="required">*</span></label>
+                            <input id="account-field-url" type="text" placeholder="https://api.example.com" required>
+                            <small>每行独立管理一个账号，同站点的多个账号填写相同地址。</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="account-field-userId">用户 ID <span class="required">*</span></label>
+                            <input id="account-field-userId" type="text" inputmode="numeric" placeholder="站点个人信息中的真实 ID" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="account-field-name">备注名称</label>
+                            <input id="account-field-name" type="text" maxlength="200" placeholder="例如：主账号">
+                        </div>
+                        <div class="form-group account-editor-wide">
+                            <label for="account-field-accessTokenEnv">令牌 Secret / 环境变量名</label>
+                            <input id="account-field-accessTokenEnv" type="text" placeholder="NEWAPI_TOKEN_ACCOUNT1" spellcheck="false">
+                            <small>只填变量名。新增时留空会分配独立名称，编辑时留空保留原名称。</small>
+                        </div>
+                        <div class="form-group account-editor-wide">
+                            <label for="account-field-accessToken">系统访问令牌</label>
+                            <input id="account-field-accessToken" type="password" autocomplete="off" placeholder="新增或更新时填写，留空保留远端已有 Secret">
+                            <small>登录站点 → 个人设置 → 系统访问令牌。表格只显示填写状态，不展示令牌。</small>
+                        </div>
+                    </div>
+                    <details id="account-editor-advanced">
+                        <summary>高级选项：Cloudflare / 旧版 Session 登录</summary>
+                        <div class="account-editor-grid">
+                            <div class="form-group">
+                                <label for="account-field-cfClearanceEnv">CF Clearance 变量名</label>
+                                <input id="account-field-cfClearanceEnv" type="text" placeholder="CF_CLEARANCE_ACCOUNT1" spellcheck="false">
+                            </div>
+                            <div class="form-group">
+                                <label for="account-field-cfClearance">CF Clearance Cookie</label>
+                                <input id="account-field-cfClearance" type="password" autocomplete="off">
+                            </div>
+                            <div class="form-group account-editor-wide">
+                                <small>CF 设置只修改当前账号；需要共享时，可引用同一个 CF 变量名。以下 Session 和登录信息仅用于旧版配置，不上传为 GitHub 账号配置。</small>
+                                <label for="account-field-session">Session（旧版）</label>
+                                <input id="account-field-session" type="password" autocomplete="off">
+                            </div>
+                            <div class="form-group">
+                                <label for="account-field-loginUser">登录账号（旧版）</label>
+                                <input id="account-field-loginUser" type="text" autocomplete="off">
+                            </div>
+                            <div class="form-group">
+                                <label for="account-field-loginPass">登录密码（旧版）</label>
+                                <input id="account-field-loginPass" type="password" autocomplete="off">
+                            </div>
+                        </div>
+                    </details>
+                    <p id="account-editor-error" role="alert"></p>
+                    <div class="account-editor-actions">
+                        <button type="button" class="btn btn-secondary" id="account-editor-cancel">取消</button>
+                        <button type="submit" class="btn btn-primary">保存到表格</button>
+                    </div>
+                </form>
+            </dialog>
 
             <div class="btn-group">
-                <button class="btn btn-primary" onclick="addSite()">➕ 添加站点</button>
                 <button class="btn btn-success" onclick="generateConfig()">✨ 生成配置</button>
             </div>
 
@@ -4367,138 +4468,14 @@
         </div>
     </div>
 
+    <script src="account_table.js"></script>
     <script>
-        let siteCount = 0;
-        const siteAccountCounts = {};
-
         window.onload = function() {
-            addSite();
+            AccountTable.init();
         };
 
         function addSite() {
-            siteCount++;
-            siteAccountCounts[siteCount] = 0;
-            const container = document.getElementById('sites-container');
-
-            const siteCard = document.createElement('div');
-            siteCard.className = 'site-card';
-            siteCard.id = `site-${siteCount}`;
-            siteCard.innerHTML = `
-                <div class="site-header">
-                    <span class="site-title">站点 ${siteCount}</span>
-                    <div class="site-actions">
-                        ${siteCount > 1 ? `<button class="btn btn-danger btn-xs" onclick="removeSite(${siteCount})">删除站点</button>` : ''}
-                    </div>
-                </div>
-                <div class="site-body">
-                    <div class="site-site-fields">
-                        <div class="form-group">
-                            <label>站点 URL <span class="required">*</span></label>
-                            <div class="url-input-wrapper">
-                                <input type="text" id="site-url-${siteCount}" placeholder="https://api.example.com">
-                                <button class="url-jump-btn" onclick="jumpToUrl(${siteCount})" title="跳转到该站点">↗</button>
-                            </div>
-                            <small>完整的站点地址，同站点下所有账号共享此 URL</small>
-                        </div>
-                        <div class="form-group">
-                            <label>CF Clearance（可选）</label>
-                            <input type="password" id="site-cfclearance-${siteCount}" placeholder="xxsCgaPMM..." autocomplete="off">
-                            <small>站点级 Cloudflare 防护 Cookie，同站点共享</small>
-                        </div>
-                        <div class="form-group">
-                            <label>CF Clearance Secret / 环境变量名（可选）</label>
-                            <input type="text" id="site-cf-env-${siteCount}" placeholder="CF_CLEARANCE_ACCOUNT1">
-                            <small>GitHub 保存时仅在公开 JSON 中记录变量名；填写 Cookie 时可自动分配</small>
-                        </div>
-                    </div>
-
-                    <hr class="accounts-divider">
-
-                    <div class="accounts-label">账号列表</div>
-                    <div id="site-accounts-${siteCount}"></div>
-
-                    <div class="add-account-row">
-                        <button class="btn btn-primary btn-sm" onclick="addAccountToSite(${siteCount})">➕ 添加账号</button>
-                    </div>
-                </div>
-            `;
-
-            container.appendChild(siteCard);
-            addAccountToSite(siteCount);
-        }
-
-        function addAccountToSite(siteId) {
-            siteAccountCounts[siteId]++;
-            const accIdx = siteAccountCounts[siteId];
-            const accountsContainer = document.getElementById(`site-accounts-${siteId}`);
-
-            const accItem = document.createElement('div');
-            accItem.className = 'account-item';
-            accItem.id = `acc-${siteId}-${accIdx}`;
-            accItem.innerHTML = `
-                <div class="account-item-header">
-                    <span class="account-item-title">账号 ${accIdx}</span>
-                    ${accIdx > 1 ? `<button class="btn btn-danger btn-xs" onclick="removeAccountFromSite(${siteId}, ${accIdx})">删除</button>` : ''}
-                </div>
-                <div class="account-fields">
-                    <div class="form-group">
-                        <label>Session <span style="color: #94a3b8;">(仅旧配置使用)</span></label>
-                        <input type="password" id="acc-session-${siteId}-${accIdx}" placeholder="新流程无需填写 Cookie">
-                    </div>
-                    <div class="form-group">
-                        <label>系统访问令牌 <span style="color: #94a3b8;">(可用于同步 Secrets / .env)</span></label>
-                        <input type="password" id="acc-access-token-${siteId}-${accIdx}" placeholder="新增或更新时填写；留空保留已有凭证" autocomplete="off">
-                        <small class="hint-amber">获取方式：登录站点 → 右上角头像 → 个人设置 → 系统访问令牌 → 生成并复制</small>
-                    </div>
-                    <div class="form-group">
-                        <label>令牌 Secret / 环境变量名</label>
-                        <input type="text" id="acc-token-env-${siteId}-${accIdx}" placeholder="NEWAPI_TOKEN_ACCOUNT1">
-                        <small class="hint-amber">只填写变量名，不填写令牌；留空时按账号顺序自动分配</small>
-                    </div>
-                    <div class="form-group">
-                        <label>用户ID <span class="required">*</span></label>
-                        <input type="text" id="acc-userid-${siteId}-${accIdx}" placeholder="123">
-                    </div>
-                    <div class="form-group">
-                        <label>备注名称</label>
-                        <input type="text" id="acc-name-${siteId}-${accIdx}" placeholder="主力站 / 备用站">
-                    </div>
-                </div>
-                <div class="account-login-fields" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px;">
-                    <div class="form-group" style="margin-bottom: 0;">
-                        <label>登录账号（可选）</label>
-                        <input type="text" id="acc-login-user-${siteId}-${accIdx}" placeholder="session失效时用于重新获取">
-                        <small style="color: rgba(245, 158, 11, 0.7);">session过期时自动登录</small>
-                    </div>
-                    <div class="form-group" style="margin-bottom: 0;">
-                        <label>登录密码（可选）</label>
-                        <input type="password" id="acc-login-pass-${siteId}-${accIdx}" placeholder="留空则不尝试自动登录">
-                        <small style="color: rgba(245, 158, 11, 0.7);">如果没填，session失效直接报错</small>
-                    </div>
-                </div>
-            `;
-
-            accountsContainer.appendChild(accItem);
-        }
-
-        function removeAccountFromSite(siteId, accIdx) {
-            const el = document.getElementById(`acc-${siteId}-${accIdx}`);
-            if (el) {
-                el.style.transition = 'all 0.3s ease';
-                el.style.opacity = '0';
-                el.style.transform = 'translateY(-10px)';
-                setTimeout(() => el.remove(), 300);
-            }
-        }
-
-        function removeSite(siteId) {
-            const el = document.getElementById(`site-${siteId}`);
-            if (el) {
-                el.style.transition = 'all 0.3s ease';
-                el.style.opacity = '0';
-                el.style.transform = 'translateY(-10px)';
-                setTimeout(() => el.remove(), 300);
-            }
+            AccountTable.openEditor();
         }
 
         function switchTab(tab) {
@@ -4705,16 +4682,16 @@
         function generateConfig(showResult = true) {
             const accounts = [];
             const repositoryAccounts = [];
-            const siteCards = document.querySelectorAll('.site-card');
+            const sites = collectFormData();
             let hasError = false;
 
-            siteCards.forEach(card => {
+            sites.forEach((site, siteIndex) => {
                 if (hasError) return;
-                const siteId = card.id.split('-')[1];
-                const url = document.getElementById(`site-url-${siteId}`).value.trim();
-                const cfClearance = document.getElementById(`site-cfclearance-${siteId}`).value.trim();
+                const siteId = siteIndex + 1;
+                const url = site.url.trim();
+                const cfClearance = site.cfClearance || '';
 
-                const cfClearanceEnv = document.getElementById(`site-cf-env-${siteId}`)?.value.trim() || '';
+                const cfClearanceEnv = site.cfClearanceEnv || '';
                 if (cfClearanceEnv && !/^[A-Z_][A-Z0-9_]*$/.test(cfClearanceEnv)) {
                     alert(`站点 ${siteId}: CF Clearance 变量名必须使用大写字母、数字和下划线`);
                     hasError = true;
@@ -4741,22 +4718,19 @@
                     return;
                 }
 
-                const accItems = card.querySelectorAll('.account-item');
+                const accItems = site.accounts;
                 if (accItems.length === 0) {
                     alert(`站点 ${siteId}: 至少需要添加一个账号`);
                     hasError = true;
                     return;
                 }
 
-                accItems.forEach(item => {
+                accItems.forEach((item, accountIndex) => {
                     if (hasError) return;
-                    const parts = item.id.split('-');
-                    const sId = parts[1];
-                    const aId = parts[2];
-                    const session = document.getElementById(`acc-session-${sId}-${aId}`).value.trim();
-                    const accessToken = document.getElementById(`acc-access-token-${sId}-${aId}`)?.value.trim() || '';
-                    const tokenEnvInput = document.getElementById(`acc-token-env-${sId}-${aId}`);
-                    let tokenEnv = tokenEnvInput.value.trim();
+                    const aId = accountIndex + 1;
+                    const session = item.session || '';
+                    const accessToken = item.accessToken || '';
+                    let tokenEnv = item.accessTokenEnv || '';
                     if (!tokenEnv) {
                         let tokenNumber = accounts.length + 1;
                         while (repositoryAccounts.some(account => account.access_token_env === `NEWAPI_TOKEN_ACCOUNT${tokenNumber}`)) {
@@ -4764,10 +4738,10 @@
                         }
                         tokenEnv = `NEWAPI_TOKEN_ACCOUNT${tokenNumber}`;
                     }
-                    const userId = document.getElementById(`acc-userid-${sId}-${aId}`).value.trim();
-                    const name = document.getElementById(`acc-name-${sId}-${aId}`).value.trim();
-                    const loginUser = document.getElementById(`acc-login-user-${sId}-${aId}`)?.value.trim() || '';
-                    const loginPass = document.getElementById(`acc-login-pass-${sId}-${aId}`)?.value.trim() || '';
+                    const userId = String(item.userId || '').trim();
+                    const name = item.name || '';
+                    const loginUser = item.loginUser || '';
+                    const loginPass = item.loginPass || '';
 
                     if (!/^[1-9][0-9]*$/.test(userId) || !/^[A-Z_][A-Z0-9_]*$/.test(tokenEnv)) {
                         alert(`站点 ${siteId} 账号 ${aId}: 用户ID 必须是正整数；令牌变量名使用大写字母、数字和下划线且不能以数字开头`);
@@ -4779,7 +4753,7 @@
                         hasError = true;
                         return;
                     }
-                    tokenEnvInput.value = tokenEnv;
+                    item.accessTokenEnv = tokenEnv;
 
                     const account = {
                         url: fullUrl,
@@ -4819,7 +4793,11 @@
                 });
             });
 
-            if (hasError || accounts.length === 0) return null;
+            if (hasError) return null;
+            if (accounts.length === 0) {
+                alert('请先添加账号或从 GitHub 加载账号配置');
+                return null;
+            }
             if (!showResult) return repositoryAccounts;
 
             document.getElementById('repository-output').textContent = JSON.stringify(repositoryAccounts, null, 2);
@@ -4915,34 +4893,7 @@
         }
 
         function collectFormData() {
-            const sites = [];
-            document.querySelectorAll('.site-card').forEach(card => {
-                const siteId = card.id.split('-')[1];
-                const url = document.getElementById(`site-url-${siteId}`).value.trim();
-                const cfClearance = document.getElementById(`site-cfclearance-${siteId}`).value.trim();
-
-                const accs = [];
-                card.querySelectorAll('.account-item').forEach(item => {
-                    const parts = item.id.split('-');
-                    const sId = parts[1];
-                    const aId = parts[2];
-                    accs.push({
-                        session: document.getElementById(`acc-session-${sId}-${aId}`).value.trim(),
-                        accessToken: document.getElementById(`acc-access-token-${sId}-${aId}`)?.value.trim() || '',
-                        accessTokenEnv: document.getElementById(`acc-token-env-${sId}-${aId}`)?.value.trim() || '',
-                        userId: document.getElementById(`acc-userid-${sId}-${aId}`).value.trim(),
-                        name: document.getElementById(`acc-name-${sId}-${aId}`).value.trim(),
-                        loginUser: document.getElementById(`acc-login-user-${sId}-${aId}`)?.value.trim() || '',
-                        loginPass: document.getElementById(`acc-login-pass-${sId}-${aId}`)?.value.trim() || ''
-                    });
-                });
-
-                if (url || cfClearance || accs.some(account => account.session || account.accessToken || account.accessTokenEnv || account.userId || account.name)) {
-                    const cfClearanceEnv = document.getElementById(`site-cf-env-${siteId}`)?.value.trim() || '';
-                    sites.push({ url, cfClearance, cfClearanceEnv, accounts: accs });
-                }
-            });
-            return sites;
+            return AccountTable.collectGrouped();
         }
 
         function saveToLocal() {
@@ -4951,7 +4902,7 @@
 
             try {
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(sites));
-                alert(`✅ 成功保存 ${sites.length} 个站点配置到本地！\n\n⚠️ 提示：Session Cookie 以明文形式存储，请注意安全。`);
+                alert(`✅ 成功保存 ${sites.length} 个站点配置到本地！\n\n⚠️ 提示：填写的令牌、Cookie 和密码以明文形式存储在当前浏览器，请注意安全。`);
             } catch (e) { alert('❌ 保存失败：' + e.message); }
         }
 
@@ -4969,39 +4920,12 @@
                     alert('⚠️ 本地配置格式错误');
                     return;
                 }
-                alert(`✅ 成功加载 ${document.querySelectorAll('.account-item').length} 个账号配置！`);
+                alert(`✅ 成功加载 ${AccountTable.count()} 个账号配置！`);
             } catch (e) { alert('❌ 加载失败：' + e.message); }
         }
 
         function loadGroupedData(sites) {
-            document.getElementById('sites-container').innerHTML = '';
-            siteCount = 0;
-
-            sites.forEach(site => {
-                addSite();
-                const sid = siteCount;
-                document.getElementById(`site-url-${sid}`).value = site.url || '';
-                document.getElementById(`site-cfclearance-${sid}`).value = site.cfClearance || '';
-                const clearanceEnvInput = document.getElementById(`site-cf-env-${sid}`);
-                if (clearanceEnvInput) clearanceEnvInput.value = site.cfClearanceEnv || '';
-
-                if (site.accounts && site.accounts.length > 0) {
-                    site.accounts.forEach((acc, i) => {
-                        if (i > 0) addAccountToSite(sid);
-                        const aid = siteAccountCounts[sid];
-                        document.getElementById(`acc-session-${sid}-${aid}`).value = acc.session || '';
-                        const accessTokenEl = document.getElementById(`acc-access-token-${sid}-${aid}`);
-                        if (accessTokenEl) accessTokenEl.value = acc.accessToken || acc.access_token || '';
-                        document.getElementById(`acc-token-env-${sid}-${aid}`).value = acc.accessTokenEnv || acc.access_token_env || '';
-                        document.getElementById(`acc-userid-${sid}-${aid}`).value = acc.userId || '';
-                        document.getElementById(`acc-name-${sid}-${aid}`).value = acc.name || '';
-                        const loginUserEl = document.getElementById(`acc-login-user-${sid}-${aid}`);
-                        const loginPassEl = document.getElementById(`acc-login-pass-${sid}-${aid}`);
-                        if (loginUserEl) loginUserEl.value = acc.loginUser || '';
-                        if (loginPassEl) loginPassEl.value = acc.loginPass || '';
-                    });
-                }
-            });
+            AccountTable.loadGrouped(sites);
         }
 
         function loadFlatData(flatAccounts) {
@@ -5058,7 +4982,7 @@
 
                 loadFlatData(accounts);
                 toggleImport();
-                alert(`✅ 成功导入 ${document.querySelectorAll('.account-item').length} 个账号配置！已按站点自动分组。`);
+                alert(`✅ 成功导入 ${AccountTable.count()} 个账号配置！已按账号展示在表格中。`);
             } catch (e) {
                 alert('❌ JSON 解析失败：' + e.message + '\n\n请检查格式是否正确');
             }
@@ -5571,27 +5495,24 @@
 
         function generateAccountsJSON() {
             const accounts = [];
-            const siteCards = document.querySelectorAll('.site-card');
+            const sites = collectFormData();
 
-            siteCards.forEach(card => {
-                const siteId = card.id.split('-')[1];
-                const url = document.getElementById(`site-url-${siteId}`).value.trim();
-                const cfClearance = document.getElementById(`site-cfclearance-${siteId}`).value.trim();
+            sites.forEach((site, siteIndex) => {
+                const siteId = siteIndex + 1;
+                const url = site.url.trim();
+                const cfClearance = site.cfClearance || '';
 
                 if (!url) return;
                 const fullUrl = url.startsWith('http') ? url : 'https://' + url;
 
-                const accItems = card.querySelectorAll('.account-item');
-                accItems.forEach(item => {
-                    const parts = item.id.split('-');
-                    const sId = parts[1];
-                    const aId = parts[2];
-                    const session = document.getElementById(`acc-session-${sId}-${aId}`).value.trim();
-                    const accessToken = document.getElementById(`acc-access-token-${sId}-${aId}`)?.value.trim() || '';
-                    const userId = document.getElementById(`acc-userid-${sId}-${aId}`).value.trim();
-                    const name = document.getElementById(`acc-name-${sId}-${aId}`).value.trim();
-                    const loginUser = document.getElementById(`acc-login-user-${sId}-${aId}`)?.value.trim() || '';
-                    const loginPass = document.getElementById(`acc-login-pass-${sId}-${aId}`)?.value.trim() || '';
+                site.accounts.forEach((item, accountIndex) => {
+                    const aId = accountIndex + 1;
+                    const session = item.session || '';
+                    const accessToken = item.accessToken || '';
+                    const userId = String(item.userId || '').trim();
+                    const name = item.name || '';
+                    const loginUser = item.loginUser || '';
+                    const loginPass = item.loginPass || '';
 
                     if (!userId) return;
 
@@ -5605,7 +5526,7 @@
                     if (accessToken) {
                         account.access_token = accessToken;
                     } else if (!session) {
-                        account.access_token_env = document.getElementById(`acc-token-env-${sId}-${aId}`).value.trim()
+                        account.access_token_env = item.accessTokenEnv
                             || `NEWAPI_TOKEN_ACCOUNT${accounts.length + 1}`;
                     }
 

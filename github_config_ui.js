@@ -96,6 +96,10 @@ async function githubRequest(payload) {
 
 function collectGithubSavePayload() {
     const target = githubTarget();
+    if (globalThis.AccountTable?.requiresReplacement()
+            && document.getElementById('github-save-mode').value !== 'replace') {
+        throw new Error('表格已删除账号、修改站点 / 用户 ID 或清除 CF 变量。合并模式无法删除远端旧配置；请确认表格包含完整远端账号后，选择「替换账号列表」再保存。');
+    }
     const accounts = generateConfig(false);
     if (!accounts) return null;
     const secrets = {};
