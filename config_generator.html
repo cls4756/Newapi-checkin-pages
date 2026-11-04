@@ -4074,6 +4074,26 @@
                         <h2 id="account-editor-title">添加账号</h2>
                         <button type="button" id="account-editor-close" class="btn btn-secondary btn-xs" aria-label="关闭账号编辑">✕</button>
                     </div>
+                    <div class="account-editor-import">
+                        <div class="account-editor-import-actions">
+                            <button type="button" id="account-editor-paste" class="btn btn-secondary btn-sm">📥 从剪贴板填入</button>
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="copyBookmarklet()">🧷 复制站点抓取书签</button>
+                        </div>
+                        <small>可填入单个账号对象或只含一个账号的数组。只预填当前弹窗，不覆盖账号表、不自动保存凭证。</small>
+                        <details id="account-editor-manual-import">
+                            <summary>手动粘贴单账号 JSON（剪贴板权限不可用时）</summary>
+                            <label class="visually-hidden" for="account-editor-import-json">单账号 JSON</label>
+                            <textarea id="account-editor-import-json" rows="4" autocomplete="off" spellcheck="false" placeholder='{"url":"https://api.example.com","user_id":"123","access_token_env":"NEWAPI_TOKEN_ACCOUNT1"}'></textarea>
+                            <button type="button" id="account-editor-import-fill" class="btn btn-secondary btn-sm">填入当前弹窗</button>
+                        </details>
+                        <details id="account-editor-bookmark-manual">
+                            <summary>手动复制站点抓取书签代码</summary>
+                            <label class="visually-hidden" for="account-editor-bookmark-code">站点抓取书签代码</label>
+                            <textarea id="account-editor-bookmark-code" rows="3" readonly autocomplete="off" spellcheck="false"></textarea>
+                            <small>点击「复制站点抓取书签」后可在此手动复制代码，新建收藏夹书签并粘贴到网址；代码本身不含账号凭证。</small>
+                        </details>
+                        <p id="account-editor-import-status" class="account-editor-import-status" role="status"></p>
+                    </div>
                     <div class="account-editor-grid">
                         <div class="form-group account-editor-wide">
                             <label for="account-field-url">站点 URL <span class="required">*</span></label>
@@ -4142,8 +4162,7 @@
                 <button class="btn btn-secondary" onclick="loadFromLocal()">📂 从本地加载</button>
                 <button class="btn btn-secondary btn-cloud" onclick="toggleGithubSync()">🐙 保存到 GitHub</button>
                 <button class="btn btn-secondary btn-cloud" onclick="toggleCloudSync()">☁️ 云端同步</button>
-                <button class="btn btn-secondary btn-import" onclick="pasteImport()">📥 粘贴板导入</button>
-                <button class="btn btn-secondary btn-import" onclick="toggleImport()">📋 导入 JSON</button>
+                <button class="btn btn-secondary btn-import" onclick="toggleImport()">📋 批量导入 JSON</button>
                 <button class="btn btn-secondary" onclick="window.open('dashboard.html', '_blank')">📊 签到历史</button>
                 <button class="btn btn-secondary btn-clear" onclick="clearLocal()">🗑️ 清除本地数据</button>
             </div>
@@ -4366,9 +4385,17 @@
             </div>
 
             <div id="import-section" class="import-section" style="display: none;">
-                <h3>📋 导入 JSON 配置</h3>
-                <p style="color: #94a3b8; font-size: 14px; margin-bottom: 16px;">粘贴已有的 JSON 配置，一键导入并按站点自动分组填充表单</p>
-                <textarea id="import-json" class="import-textarea" placeholder='粘贴 JSON 配置，例如：
+                <h3>📋 批量导入 JSON 配置</h3>
+                <p style="color: #94a3b8; font-size: 14px; margin-bottom: 16px;">支持平铺账号数组或按站点分组的配置。合并时留空字段保留已有值，新账号留空变量名会分配独立名称。导入只更新表格草稿，不自动保存到浏览器或 GitHub；单账号预填请使用「添加账号」。</p>
+                <label class="account-import-mode">
+                    导入方式
+                    <select id="import-mode">
+                        <option value="merge">合并账号：保留其他账号，更新同站点 + 用户 ID 的账号</option>
+                        <option value="replace">替换整张账号表：需再次确认完整列表</option>
+                    </select>
+                </label>
+                <label class="visually-hidden" for="import-json">批量账号 JSON</label>
+                <textarea id="import-json" class="import-textarea" autocomplete="off" spellcheck="false" placeholder='粘贴 JSON 配置，例如：
 [
   {
     "url": "https://api.example.com",
@@ -4386,11 +4413,11 @@
             <div class="tips" style="margin-top: 24px;">
                 <h4>💡 使用提示：</h4>
                 <ul>
-                    <li><strong>站点分组：</strong>同一站点的 URL 和 CF Clearance 只需填写一次，站点下可添加多个账号</li>
-                    <li><strong>推荐流程：</strong>填写站点、真实用户ID、备注和令牌变量名，复制「仓库配置」到 <code>accounts.config.json</code>；无需在本页面输入真实令牌</li>
+                    <li><strong>账号管理：</strong>每行一个账号；同站点的多个账号填写相同 URL，令牌变量名必须独立。需要共享 CF Clearance 时可引用同一 CF 变量名。</li>
+                    <li><strong>推荐流程：</strong>先从 GitHub 加载完整列表，再添加或编辑账号；剪贴板和书签只预填弹窗，检查后保存到表格，最后确认保存到 GitHub。</li>
                     <li><strong>独立凭证：</strong>每个账号的系统访问令牌分别保存到同名 GitHub Secret 或本地 <code>.env</code>，工作流中也需映射同名变量</li>
-                    <li><strong>保存到本地：</strong>将配置保存到浏览器本地存储，下次访问自动加载</li>
-                    <li><strong>明文存储：</strong>数据以明文形式存储在浏览器中，请注意安全</li>
+                    <li><strong>保存到本地：</strong>只有主动点击该按钮才保存到浏览器，下次需点击「从本地加载」恢复；不会回写设备的配置文件。</li>
+                    <li><strong>明文存储：</strong>主动保存到浏览器会包含已填写的令牌、Cookie 和密码，请注意安全；导入和书签抓取不再自动保存。</li>
                 </ul>
             </div>
 
@@ -4399,7 +4426,7 @@
                 <p style="font-size: 13px; margin-bottom: 12px; line-height: 1.7;">
                     把下面的书签拖到浏览器收藏夹。以后在任何已登录的 NewAPI 站点页面上点一下这个书签，
                     就会自动抓取 <strong>站点地址、用户ID、系统访问令牌</strong>（现场生成新令牌，旧令牌自动作废），
-                    并自动打开本页面回填配置——全程无需 F12。
+                    抓取前会提示令牌重置风险；抓取后复制单账号 JSON，再在本页「添加账号 → 从剪贴板填入」中预览——无需 F12，不覆盖已有账号。
                 </p>
                 <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 12px;">
                     <a id="bookmarklet-link" href="#" onclick="return false;"
@@ -4411,14 +4438,20 @@
                 </div>
                 <small style="color: #94a3b8; line-height: 1.6; display: block;">
                     使用方法：① 把蓝色按钮拖到收藏夹栏（或点「复制书签代码」手动新建书签，网址粘贴代码）；
-                    ② 打开任意已登录的 NewAPI 站点；③ 点收藏夹里的书签，确认后自动回填本页。
-                    💡 支持多站点：连续去多个站点点书签，抓取结果会累计暂存并一起回填。
-                    ⚠️ 注意：每次抓取会重新生成该站点的系统访问令牌，旧令牌将失效。
+                    ② 打开任意已登录的 NewAPI 站点；③ 点书签并确认令牌重置风险；
+                    ④ 回到当前配置页，点击「添加账号 → 从剪贴板填入 → 保存到表格」，最后保存到 GitHub。
+                    💡 支持多账号：逐个抓取并确认加入当前表格草稿；同站点不同用户 ID 不会相互覆盖，已有账号会提示转为编辑。
+                    ⚠️ 注意：每次抓取会重新生成该站点的系统访问令牌，旧令牌将失效。已有表格草稿时请切回原配置页，不要另开页面。
+                    布局更新后请重新拖拽或复制新版书签；新版不会把令牌写入页面 URL，也不会自动保存到浏览器。
                 </small>
-                <div id="bm-stash-info" style="margin-top: 12px; font-size: 13px; color: #475569;">📭 暂存区为空</div>
+                <p id="bookmark-status" class="account-table-status" role="status"></p>
+                <p id="bookmark-pending-info" class="account-table-help">没有待确认的旧版书签数据。新书签请从添加账号弹窗中粘贴。</p>
                 <div style="margin-top: 8px; display: flex; gap: 10px; flex-wrap: wrap;">
-                    <button class="btn btn-secondary btn-sm" id="bm-refill-btn" style="display: none;" onclick="refillBookmarkStash()">📋 回填暂存站点</button>
-                    <button class="btn btn-secondary btn-sm" id="bm-clear-btn" style="display: none;" onclick="clearBookmarkStash()">🧹 清空暂存</button>
+                    <button class="btn btn-secondary btn-sm" id="bookmark-fill-btn" hidden onclick="fillBookmarkPending()">📋 预填下一个待确认账号</button>
+                    <button class="btn btn-secondary btn-sm" id="bookmark-merge-btn" hidden onclick="mergeBookmarkPending()">合并全部待确认账号到草稿</button>
+                    <button class="btn btn-secondary btn-sm" id="bookmark-clear-btn" hidden onclick="clearBookmarkPending()">🧹 清空当前待确认数据</button>
+                    <button class="btn btn-secondary btn-sm" onclick="restoreLegacyBookmarkCache()">恢复旧版缓存到待确认</button>
+                    <button class="btn btn-secondary btn-sm" onclick="clearLegacyBookmarkCache()">清除旧版浏览器抓取缓存</button>
                 </div>
             </div>
 
@@ -4473,6 +4506,7 @@
     <script>
         window.onload = function() {
             AccountTable.init();
+            initAccountImport();
         };
 
         function addSite() {
@@ -4488,31 +4522,50 @@
 
         // ─── 站点一键抓取书签 ─────────────────────────────────────
 
-        const BOOKMARKLET_SRC = [
-            "(function(){",
-            "var origin=location.origin;",
-            "var uid=null;",
-            "try{var u=JSON.parse(localStorage.getItem('user')||'null');if(u&&u.id)uid=u.id;}catch(e){}",
-            "var go=function(cfg){",
-            "try{navigator.clipboard.writeText(cfg);}catch(e){}",
-            "if(confirm('已抓取站点配置，点击确定打开本地配置页面并自动回填：')){",
-            "window.open('" + location.origin + location.pathname + "#bm='+encodeURIComponent(cfg),'_blank');",
-            "}",
-            "};",
-            "fetch(origin+'/api/user/self',{credentials:'include'})",
-            ".then(function(r){return r.json();})",
-            ".then(function(self){",
-            "if(self&&self.success&&self.data&&self.data.id){uid=self.data.id;}",
-            "return fetch(origin+'/api/user/token',{credentials:'include'}).then(function(r){return r.json();});",
-            "})",
-            ".then(function(tok){",
-            "var token=(tok&&tok.success&&tok.data)?tok.data:'';",
-            "var cfg=JSON.stringify([{url:origin,session:'',access_token:token,user_id:String(uid||''),name:location.hostname}]);",
-            "go(cfg);",
-            "})",
-            ".catch(function(e){alert('抓取失败: '+(e.message||e));});",
-            "})();"
-        ].join(' ');
+        async function captureSiteAccount(configUrl) {
+            if (!confirm('抓取将重新生成本站的系统访问令牌，旧令牌会失效。请及时更新签到配置，不要重复抓取。\n确认继续？')) return;
+            try {
+                let storedUserId = '';
+                try {
+                    const storedUser = JSON.parse(localStorage.getItem('user') || 'null');
+                    if (storedUser?.id) storedUserId = String(storedUser.id);
+                } catch {}
+                const selfHeaders = storedUserId ? {'New-Api-User': storedUserId} : {};
+                const selfResponse = await fetch(location.origin + '/api/user/self', {
+                    credentials: 'include', headers: selfHeaders, cache: 'no-store', redirect: 'error'
+                });
+                if (!selfResponse.ok) throw new Error('User request failed');
+                const self = await selfResponse.json();
+                const userId = String(self?.data?.id || '');
+                if (!self?.success || !/^[1-9][0-9]*$/.test(userId)) throw new Error('User unavailable');
+                const tokenResponse = await fetch(location.origin + '/api/user/token', {
+                    credentials: 'include', headers: {'New-Api-User': userId}, cache: 'no-store', redirect: 'error'
+                });
+                if (!tokenResponse.ok) throw new Error('Token request failed');
+                const token = await tokenResponse.json();
+                if (!token?.success || typeof token.data !== 'string' || !token.data.trim()) throw new Error('Token unavailable');
+                const accountJson = JSON.stringify([{
+                    url: location.origin, user_id: userId, access_token: token.data, name: location.hostname
+                }]);
+                let copied = false;
+                try {
+                    if (navigator.clipboard?.writeText) {
+                        await navigator.clipboard.writeText(accountJson);
+                        copied = true;
+                    }
+                } catch {}
+                if (!copied && prompt('系统令牌已生成，但自动复制未完成。请手动复制下方单账号 JSON，回配置页「添加账号」中填入；不要分享其中的令牌。', accountJson) === null) return;
+                if (confirm((copied ? '单账号 JSON 已复制。' : '手动复制后继续。')
+                        + '\n请回配置页点击「添加账号 → 从剪贴板填入 → 保存到表格」，最后保存到 GitHub。'
+                        + '\n已有草稿请取消并切回原配置页；确认则尝试打开一个新的配置页，若浏览器拦截请手动返回。')) {
+                    window.open(configUrl + '#add-account', '_blank', 'noopener,noreferrer');
+                }
+            } catch {
+                alert('抓取未完成，请确认本站仍已登录且支持用户信息和系统令牌接口。若接口已生成新令牌，旧令牌可能已失效，请及时更新配置或重新获取。');
+            }
+        }
+
+        const BOOKMARKLET_SRC = '(' + captureSiteAccount.toString() + ')(' + JSON.stringify(location.origin + location.pathname) + ');';
 
         function buildBookmarkletHref() {
             return 'javascript:' + encodeURIComponent(BOOKMARKLET_SRC);
@@ -4520,108 +4573,161 @@
 
         function copyBookmarklet() {
             const code = decodeURIComponent(buildBookmarkletHref().replace(/^javascript:/, ''));
-            navigator.clipboard.writeText('javascript:' + code).then(() => {
-                showCloudStatus('success', '✅ 书签代码已复制：新建一个收藏夹书签，名称随意，网址粘贴这段代码');
-            }).catch(() => {
-                showCloudStatus('error', '❌ 复制失败，请手动展开下方代码复制');
-            });
-        }
-
-        function importFromData(accounts, sourceName) {
-            if (!Array.isArray(accounts) || !accounts.length) {
-                alert('⚠️ ' + sourceName + ' 中没有有效的账号数据');
+            if (document.getElementById('account-editor').open) document.getElementById('account-editor-bookmark-code').value = 'javascript:' + code;
+            if (!navigator.clipboard?.writeText) {
+                showBookmarkCopyFallback();
                 return;
             }
-            for (let i = 0; i < accounts.length; i++) {
-                const acc = accounts[i];
-                if (!acc.url || (!acc.session && !acc.access_token && !acc.access_token_env)) {
-                    alert(`⚠️ 第 ${i + 1} 个账号需要 url 和 access_token_env（旧配置也可使用 session 或 access_token）`);
-                    return;
-                }
-            }
-            loadFlatData(accounts);
-            saveToLocal();
-            alert(`✅ 已从${sourceName}回填 ${accounts.length} 个账号（表单已自动保存到本地）`);
-        }
-
-        function pasteImport() {
-            navigator.clipboard.readText().then(text => {
-                if (!text.trim()) { alert('⚠️ 剪贴板是空的'); return; }
-                try {
-                    importFromData(JSON.parse(text), '剪贴板');
-                } catch (e) {
-                    alert('❌ 剪贴板内容不是有效的 JSON：' + e.message);
-                }
-            }).catch(e => {
-                alert('❌ 无法读取剪贴板（浏览器可能未授权）：' + e.message + '\n可改用「📋 导入 JSON」手动粘贴');
+            navigator.clipboard.writeText('javascript:' + code).then(() => {
+                const message = '书签代码已复制：新建收藏夹书签，将代码粘贴到网址；抓取后回「添加账号」中填入。';
+                showBookmarkStatus(message);
+                if (document.getElementById('account-editor').open) document.getElementById('account-editor-import-status').textContent = message;
+            }).catch(() => {
+                showBookmarkCopyFallback();
             });
         }
 
-        // 书签回填：#bm=<URL编码的账号JSON>
-        // 多站点暂存：每次抓取按 url 合并进 localStorage 暂存区，
-        // 表单回填全部暂存站点——可以连续去多个站点点书签再一起保存
-        const BM_STASH_KEY = 'newapi_bm_stash';
-
-        function loadBookmarkStash() {
-            try { return JSON.parse(localStorage.getItem(BM_STASH_KEY) || '[]'); }
-            catch (e) { return []; }
-        }
-
-        function saveBookmarkStash(stash) {
-            localStorage.setItem(BM_STASH_KEY, JSON.stringify(stash.slice(-12)));
-        }
-
-        function updateBookmarkStashUI() {
-            const stash = loadBookmarkStash();
-            const info = document.getElementById('bm-stash-info');
-            if (!info) return;
-            if (!stash.length) {
-                info.innerHTML = '📭 暂存区为空：去任意已登录的 NewAPI 站点点击书签即可抓取';
-                document.getElementById('bm-refill-btn').style.display = 'none';
-                document.getElementById('bm-clear-btn').style.display = 'none';
-            } else {
-                const names = stash.map(a => a.name || a.url.replace(/^https?:\/\//, '')).join('、');
-                info.innerHTML = `📦 暂存 <strong>${stash.length}</strong> 个站点：${names}`;
-                document.getElementById('bm-refill-btn').style.display = '';
-                document.getElementById('bm-clear-btn').style.display = '';
+        function showBookmarkCopyFallback() {
+            const open = document.getElementById('account-editor').open;
+            const message = open ? '无法自动复制，请手动复制下方书签代码；不需要关闭或清空当前弹窗。'
+                : '无法自动复制，请把本页蓝色「抓取签到配置」按钮拖到收藏夹栏。';
+            showBookmarkStatus(message, true);
+            if (open) {
+                document.getElementById('account-editor-bookmark-code').value = 'javascript:' + decodeURIComponent(buildBookmarkletHref().slice('javascript:'.length));
+                document.getElementById('account-editor-bookmark-manual').open = true;
+                document.getElementById('account-editor-error').textContent = message;
+                document.getElementById('account-editor-bookmark-code').focus();
             }
         }
 
-        function refillBookmarkStash() {
-            const stash = loadBookmarkStash();
-            if (!stash.length) { alert('📭 暂存区为空：先去站点上点书签抓取'); return; }
-            importFromData(stash, '抓取暂存');
+        let bookmarkPending = [];
+        let bookmarkPreviewAccount = null;
+        let accountImportInitialized = false;
+        let initialImportHash = consumeImportHash();
+
+        function consumeImportHash() {
+            const hash = location.hash || '';
+            if (hash.startsWith('#bm=') || hash === '#add-account') history.replaceState(null, '', location.pathname + location.search);
+            return hash;
         }
 
-        function clearBookmarkStash() {
-            if (!confirm('确定清空抓取暂存？不影响已保存的配置')) return;
-            localStorage.removeItem(BM_STASH_KEY);
-            updateBookmarkStashUI();
+        function showBookmarkStatus(message, isError = false) {
+            const status = document.getElementById('bookmark-status');
+            status.textContent = message;
+            status.className = isError ? 'account-table-status is-error' : 'account-table-status';
         }
 
-        (function handleBookmarkHash() {
-            const m = (location.hash || '').match(/^#bm=(.+)$/);
-            if (!m) { updateBookmarkStashUI(); return; }
-            let stash = loadBookmarkStash();
+        function bookmarkIdentity(account) {
+            return JSON.stringify([account.url, account.userId]);
+        }
+
+        function updateBookmarkPendingUI() {
+            document.getElementById('bookmark-pending-info').textContent = bookmarkPending.length
+                ? `待确认 ${bookmarkPending.length} 个旧版书签账号：${bookmarkPending.map(account => account.name || account.url).join('、')}。只在当前页面内暂存，未保存到浏览器或 GitHub。`
+                : '没有待确认的旧版书签数据。新书签请从添加账号弹窗中粘贴。';
+            document.getElementById('bookmark-fill-btn').hidden = !bookmarkPending.length;
+            document.getElementById('bookmark-merge-btn').hidden = bookmarkPending.length < 2;
+            document.getElementById('bookmark-clear-btn').hidden = !bookmarkPending.length;
+        }
+
+        function fillBookmarkPending() {
+            if (!bookmarkPending.length) return;
             try {
-                const fresh = JSON.parse(decodeURIComponent(m[1]));
-                let added = 0, updated = 0;
-                fresh.forEach(acc => {
-                    if (!acc.url) return;
-                    const i = stash.findIndex(x => x.url === acc.url);
-                    if (i >= 0) { stash[i] = acc; updated++; } else { stash.push(acc); added++; }
-                });
-                localStorage.setItem(BM_STASH_KEY, JSON.stringify(stash.slice(-12)));
-                loadFlatData(stash);
-                saveToLocal();
-                updateBookmarkStashUI();
-                alert(`🧷 书签抓取完成：新增 ${added} 个、更新 ${updated} 个站点，暂存共 ${stash.length} 个已全部回填表单`);
-            } catch (e) {
-                alert('❌ 书签数据解析失败：' + e.message);
-            } finally {
-                history.replaceState(null, '', location.pathname);
+                const account = bookmarkPending[0];
+                if (AccountTable.fillEditor(account, '旧版书签')) bookmarkPreviewAccount = account;
+            } catch (error) {
+                showBookmarkStatus(error.message, true);
             }
-        })();
+        }
+
+        function mergeBookmarkPending() {
+            if (!bookmarkPending.length || !confirm('将全部待确认账号合并到当前表格草稿，保留其他账号，同站点 + 用户 ID 的账号会更新。\n不会自动保存到浏览器或 GitHub，是否继续？')) return;
+            try {
+                const result = AccountTable.importAccounts(bookmarkPending, 'merge');
+                bookmarkPending = [];
+                bookmarkPreviewAccount = null;
+                updateBookmarkPendingUI();
+                showBookmarkStatus(`已合并到草稿：新增 ${result.added} 个、更新 ${result.updated} 个账号；请检查后保存到 GitHub。`);
+            } catch (error) {
+                showBookmarkStatus(error.message, true);
+            }
+        }
+
+        function clearBookmarkPending() {
+            if (!confirm('清空当前页面的待确认书签数据？不改变当前弹窗或表格草稿。')) return;
+            bookmarkPending = [];
+            bookmarkPreviewAccount = null;
+            updateBookmarkPendingUI();
+        }
+
+        function clearLegacyBookmarkCache() {
+            if (!confirm('清除旧版保存在当前浏览器的抓取缓存（可能含明文令牌）？不会读取缓存，也不改变当前草稿。')) return;
+            try {
+                localStorage.removeItem('newapi_bm_stash');
+                showBookmarkStatus('旧版浏览器抓取缓存已清除，当前草稿未改变。');
+            } catch {
+                showBookmarkStatus('无法清除旧版缓存，请检查浏览器存储权限。', true);
+            }
+        }
+
+        function queueBookmarkAccounts(data) {
+            const fresh = AccountTable.parseAccounts(data);
+            const merged = new Map(bookmarkPending.map(account => [bookmarkIdentity(account), account]));
+            fresh.forEach(account => merged.set(bookmarkIdentity(account), account));
+            if (merged.size > 200) throw new Error('待确认账号不能超过 200 个');
+            bookmarkPending = [...merged.values()];
+            updateBookmarkPendingUI();
+            if (bookmarkPending.length === 1 && !document.getElementById('account-editor').open) fillBookmarkPending();
+        }
+
+        function restoreLegacyBookmarkCache() {
+            if (!confirm('旧版缓存可能含明文或已失效的令牌。确认后只读取抓取缓存到当前页面预览，不覆盖账号表、不自动保存或上传。\n是否继续？')) return;
+            try {
+                const saved = localStorage.getItem('newapi_bm_stash');
+                if (!saved) {
+                    showBookmarkStatus('当前浏览器没有旧版抓取缓存。');
+                    return;
+                }
+                queueBookmarkAccounts(saved);
+                showBookmarkStatus('旧版缓存已恢复为待确认账号，请核对令牌是否仍有效；未覆盖账号表、未自动保存。');
+            } catch {
+                showBookmarkStatus('旧版缓存无法读取或格式无效，未修改账号表；可手动清除旧版缓存。', true);
+            }
+        }
+
+        function handleBookmarkHash(hash) {
+            if (hash === '#add-account') {
+                if (!document.getElementById('account-editor').open) AccountTable.openEditor();
+                document.getElementById('account-editor-import-status').textContent = '抓取结果只在剪贴板中，请主动点击「从剪贴板填入」，检查后保存到表格。';
+                return;
+            }
+            if (!hash.startsWith('#bm=')) return;
+            try {
+                queueBookmarkAccounts(decodeURIComponent(hash.slice(4)));
+                showBookmarkStatus('已接收旧版书签数据并清除地址栏中的数据；未覆盖账号表、未自动保存。请更新为新版书签。');
+            } catch {
+                showBookmarkStatus('旧版书签数据无效，未修改账号表。请重新复制新版抓取书签，或在添加账号中手动粘贴 JSON。', true);
+            }
+        }
+
+        function initAccountImport() {
+            if (accountImportInitialized) return;
+            accountImportInitialized = true;
+            document.addEventListener('account-draft-saved', event => {
+                bookmarkPending = bookmarkPending.filter(account => account !== bookmarkPreviewAccount
+                    || bookmarkIdentity(account) !== bookmarkIdentity(event.detail));
+                bookmarkPreviewAccount = null;
+                updateBookmarkPendingUI();
+            });
+            document.getElementById('account-editor').addEventListener('close', () => {
+                if (!document.getElementById('account-editor').open) bookmarkPreviewAccount = null;
+            });
+            window.addEventListener('hashchange', () => handleBookmarkHash(consumeImportHash()));
+            updateBookmarkPendingUI();
+            const hash = initialImportHash;
+            initialImportHash = '';
+            handleBookmarkHash(hash);
+        }
 
         // 初始化书签链接
         (function initBookmarklet() {
@@ -4967,25 +5073,14 @@
             if (!raw) { alert('⚠️ 请先粘贴 JSON 配置'); return; }
 
             try {
-                const accounts = JSON.parse(raw);
-                if (!Array.isArray(accounts) || accounts.length === 0) {
-                    alert('⚠️ JSON 格式错误：应为账号数组（[]）');
-                    return;
-                }
-
-                for (let i = 0; i < accounts.length; i++) {
-                    const acc = accounts[i];
-                    if (!acc.url || (!acc.session && !acc.access_token && !acc.access_token_env)) {
-                        alert(`⚠️ 第 ${i + 1} 个账号需要 url 和 access_token_env（旧配置也可使用 session 或 access_token）`);
-                        return;
-                    }
-                }
-
-                loadFlatData(accounts);
+                const accounts = AccountTable.parseAccounts(raw);
+                const mode = document.getElementById('import-mode').value;
+                if (mode === 'replace' && !confirm('将用导入数据替换整张账号表，未包含的账号会从当前草稿移除。\n请先确认已加载完整列表；后续保存到 GitHub 需选择「替换账号列表」。是否继续？')) return;
+                const result = AccountTable.importAccounts(accounts, mode);
                 toggleImport();
-                alert(`✅ 成功导入 ${AccountTable.count()} 个账号配置！已按账号展示在表格中。`);
+                alert(`✅ 已导入草稿：新增 ${result.added} 个、更新 ${result.updated} 个，共 ${result.count} 个账号。\n未自动保存到浏览器或 GitHub。`);
             } catch (e) {
-                alert('❌ JSON 解析失败：' + e.message + '\n\n请检查格式是否正确');
+                alert('❌ 导入失败：' + e.message);
             }
         }
 

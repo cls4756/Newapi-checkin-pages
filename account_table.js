@@ -8,6 +8,7 @@ globalThis.AccountTable = (() => {
     let replacementNeeded = false;
     let initialized = false;
     let allocatedNames = new Set();
+    let editorRevision = 0;
 
     function element(identifier) {
         return document.getElementById(identifier);
@@ -47,8 +48,8 @@ globalThis.AccountTable = (() => {
         return JSON.stringify([url, account.userId]);
     }
 
-    function nextTokenName(accounts) {
-        const used = new Set([...allocatedNames,
+    function nextTokenName(accounts, usedNames = allocatedNames) {
+        const used = new Set([...usedNames,
             ...accounts.flatMap(account => [account.accessTokenEnv, account.cfClearanceEnv])]);
         let tokenNumber = 1;
         while (used.has('NEWAPI_TOKEN_ACCOUNT' + tokenNumber)) tokenNumber += 1;
@@ -61,20 +62,21 @@ globalThis.AccountTable = (() => {
         target.className = isError ? 'account-table-status is-error' : 'account-table-status';
     }
 
-    function saveAccount(values, identifier = null) {
+    function validateFields(values) {
         const account = normalize(values);
-        const previous = identifier === null ? null : rows.find(row => row.id === identifier);
-        if (identifier !== null && !previous) throw new Error('该账号已不存在，请重新加载列表');
-        if (!previous && rows.length >= 200) throw new Error('最多支持 200 个账号');
         account.url = normalizedUrl(account.url);
         if (!/^[1-9][0-9]*$/.test(account.userId)) throw new Error('用户 ID 必须是站点个人信息中的正整数');
         if (account.name.length > 200) throw new Error('备注名称不能超过 200 个字符');
-        const others = rows.filter(row => row.id !== identifier);
-        if (!account.accessTokenEnv) account.accessTokenEnv = previous?.accessTokenEnv || nextTokenName(others);
-        if (!/^[A-Z_][A-Z0-9_]*$/.test(account.accessTokenEnv)
+        if ((account.accessTokenEnv && !/^[A-Z_][A-Z0-9_]*$/.test(account.accessTokenEnv))
                 || (account.cfClearanceEnv && !/^[A-Z_][A-Z0-9_]*$/.test(account.cfClearanceEnv))) {
             throw new Error('Secret / 环境变量名只能使用大写字母、数字和下划线，不能以数字开头');
         }
+        return account;
+    }
+
+    function validateAccount(values, others, previous, usedNames = allocatedNames) {
+        const account = validateFields(values);
+        if (!account.accessTokenEnv) account.accessTokenEnv = previous?.accessTokenEnv || nextTokenName(others, usedNames);
         if (others.some(row => identity(row) === identity(account))) {
             throw new Error('同一站点和用户 ID 的账号已存在，请编辑已有账号');
         }
@@ -86,6 +88,14 @@ globalThis.AccountTable = (() => {
         if (combined.some(row => row.cfClearanceEnv && tokenNames.has(row.cfClearanceEnv))) {
             throw new Error('CF Clearance 变量名不能与账号令牌变量名相同');
         }
+        return account;
+    }
+
+    function saveAccount(values, identifier = null) {
+        const previous = identifier === null ? null : rows.find(row => row.id === identifier);
+        if (identifier !== null && !previous) throw new Error('该账号已不存在，请重新加载列表');
+        if (!previous && rows.length >= 200) throw new Error('最多支持 200 个账号');
+        const account = validateAccount(values, rows.filter(row => row.id !== identifier), previous);
         allocatedNames.add(account.accessTokenEnv);
         if (account.cfClearanceEnv) allocatedNames.add(account.cfClearanceEnv);
         if (previous) {
@@ -103,7 +113,88 @@ globalThis.AccountTable = (() => {
         status(replacementNeeded
             ? '草稿已更新。删除账号、修改站点 / 用户 ID 或清除 CF 变量后，保存到 GitHub 时需选择「替换账号列表」。'
             : '账号草稿已更新，尚未保存到 GitHub 或浏览器本地。');
+        document.dispatchEvent(new CustomEvent('account-draft-saved', {detail: {url: account.url, userId: account.userId}}));
         return identifier;
+    }
+
+    function parseAccounts(data) {
+        let parsed = data;
+        if (typeof data === 'string') {
+            if (new TextEncoder().encode(data).length > 1024 * 1024) throw new Error('导入 JSON 不能超过 1 MB');
+            if (!data.trim()) throw new Error('请先粘贴账号 JSON');
+            try {
+                parsed = JSON.parse(data);
+            } catch {
+                throw new Error('JSON 格式不正确，请检查括号、引号和逗号');
+            }
+        }
+        const entries = Array.isArray(parsed) ? parsed : [parsed];
+        if (!entries.length || entries.length > 200) throw new Error('导入数据必须包含 1 至 200 个账号');
+        const imported = [];
+        const identities = new Set();
+        for (const entry of entries) {
+            if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new Error('账号 JSON 必须是对象或账号数组');
+            const accounts = Object.prototype.hasOwnProperty.call(entry, 'accounts') ? entry.accounts : [entry];
+            if (!Array.isArray(accounts) || !accounts.length) throw new Error('站点配置缺少有效的账号数组');
+            for (const values of accounts) {
+                if (!values || typeof values !== 'object' || Array.isArray(values)) throw new Error('账号配置格式错误');
+                if (imported.length >= 200) throw new Error('最多支持 200 个账号');
+                const account = validateFields({
+                    url: values.url ?? entry.url,
+                    userId: values.userId ?? values.user_id,
+                    name: values.name,
+                    accessTokenEnv: values.accessTokenEnv ?? values.access_token_env,
+                    accessToken: values.accessToken ?? values.access_token,
+                    cfClearanceEnv: values.cfClearanceEnv ?? values.cf_clearance_env ?? entry.cfClearanceEnv ?? entry.cf_clearance_env,
+                    cfClearance: values.cfClearance ?? values.cf_clearance ?? entry.cfClearance ?? entry.cf_clearance,
+                    session: values.session,
+                    loginUser: values.loginUser ?? values.login_username,
+                    loginPass: values.loginPass ?? values.login_password
+                });
+                if (identities.has(identity(account))) throw new Error('导入数据中存在重复的站点和用户 ID');
+                identities.add(identity(account));
+                imported.push(account);
+            }
+        }
+        return imported;
+    }
+
+    function importAccounts(data, mode = 'merge') {
+        if (!['merge', 'replace'].includes(mode)) throw new Error('导入方式必须是合并或替换');
+        const imported = parseAccounts(data);
+        let stagedRows = mode === 'replace' ? [] : rows.map(row => ({...row}));
+        const stagedNames = new Set([...allocatedNames,
+            ...imported.flatMap(account => [account.accessTokenEnv, account.cfClearanceEnv].filter(Boolean))]);
+        let stagedNextId = nextId;
+        let added = 0;
+        let updated = 0;
+        for (const incoming of imported) {
+            const previous = rows.find(row => identity(row) === identity(incoming));
+            const values = Object.fromEntries(fieldNames.map(field => [field, incoming[field] || previous?.[field] || '']));
+            const account = validateAccount(values, stagedRows.filter(row => row.id !== previous?.id), previous, stagedNames);
+            stagedNames.add(account.accessTokenEnv);
+            if (account.cfClearanceEnv) stagedNames.add(account.cfClearanceEnv);
+            if (previous) {
+                const row = {...account, id: previous.id};
+                if (mode === 'replace') stagedRows.push(row);
+                else stagedRows = stagedRows.map(existing => existing.id === previous.id ? row : existing);
+                updated += 1;
+            } else {
+                stagedRows.push({...account, id: stagedNextId++});
+                added += 1;
+            }
+            if (stagedRows.length > 200) throw new Error('最多支持 200 个账号');
+        }
+        rows = stagedRows;
+        allocatedNames = stagedNames;
+        nextId = stagedNextId;
+        replacementNeeded = replacementNeeded || mode === 'replace';
+        page = 1;
+        element('account-search').value = '';
+        render();
+        status(`已导入草稿：新增 ${added} 个、更新 ${updated} 个账号；未保存到浏览器或 GitHub。`
+            + (replacementNeeded ? '保存到 GitHub 时需选择「替换账号列表」，请先确认完整列表。' : ''));
+        return {added, updated, count: rows.length};
     }
 
     function loadGrouped(sites) {
@@ -237,13 +328,74 @@ globalThis.AccountTable = (() => {
             return;
         }
         editingId = identifier;
+        editorRevision += 1;
         element('account-editor-form').reset();
         fieldNames.forEach(field => { element('account-field-' + field).value = row[field]; });
         element('account-editor-title').textContent = identifier === null ? '添加账号' : '编辑账号';
         element('account-editor-error').textContent = '';
+        element('account-editor-import-status').textContent = '';
+        element('account-editor-import-json').value = '';
+        element('account-editor-manual-import').open = false;
+        element('account-editor-bookmark-code').value = '';
+        element('account-editor-bookmark-manual').open = false;
+        element('account-editor-paste').disabled = false;
         element('account-editor-advanced').open = false;
-        element('account-editor').showModal();
+        if (!element('account-editor').open) element('account-editor').showModal();
         element('account-field-url').focus();
+    }
+
+    function fillEditor(data, sourceName = '导入数据') {
+        const imported = parseAccounts(data);
+        if (imported.length !== 1) throw new Error('此处只填写一个账号；多个账号请使用主页面的「批量导入 JSON」');
+        const account = imported[0];
+        const existing = rows.find(row => identity(row) === identity(account));
+        const current = rows.find(row => row.id === editingId);
+        if (element('account-editor').open && current && existing?.id !== current.id) {
+            throw new Error('导入账号与当前编辑账号不同，请取消后在「添加账号」中导入');
+        }
+        const changed = element('account-editor').open && fieldNames.some(field =>
+            element('account-field-' + field).value !== (current?.[field] || ''));
+        if ((changed || (existing && editingId !== existing.id))
+                && !confirm((existing ? '该账号已在表格中，将打开它的编辑弹窗并填入数据。' : '将替换当前弹窗已填写的内容。')
+                    + '\n其他账号不会改变，仍需点击「保存到表格」。是否继续？')) return false;
+        openEditor(existing?.id ?? null);
+        fieldNames.forEach(field => { element('account-field-' + field).value = account[field] || existing?.[field] || ''; });
+        element('account-editor-advanced').open = fieldNames.slice(5).some(field => account[field]);
+        element('account-editor-import-status').textContent = `已从${sourceName}填入一个账号；仅当前弹窗，检查后点击「保存到表格」。`;
+        element('account-field-url').focus();
+        return true;
+    }
+
+    async function pasteIntoEditor() {
+        if (!element('account-editor').open) return;
+        const revision = editorRevision;
+        element('account-editor-paste').disabled = true;
+        element('account-editor-error').textContent = '';
+        try {
+            if (!navigator.clipboard?.readText) throw new Error('Clipboard unavailable');
+            const content = await navigator.clipboard.readText();
+            if (!element('account-editor').open || editorRevision !== revision) return;
+            fillEditor(content, '剪贴板');
+        } catch (error) {
+            if (!element('account-editor').open || editorRevision !== revision) return;
+            element('account-editor-error').textContent = error.message === 'Clipboard unavailable'
+                || ['NotAllowedError', 'SecurityError'].includes(error.name)
+                ? '无法读取剪贴板，请在下方「手动粘贴单账号 JSON」中粘贴并填入。'
+                : error.message;
+            element('account-editor-manual-import').open = true;
+            element('account-editor-import-json').focus();
+        } finally {
+            if (editorRevision === revision) element('account-editor-paste').disabled = false;
+        }
+    }
+
+    function importEditorJSON() {
+        try {
+            element('account-editor-error').textContent = '';
+            fillEditor(element('account-editor-import-json').value, '手动 JSON');
+        } catch (error) {
+            element('account-editor-error').textContent = error.message;
+        }
     }
 
     function saveEditor(event) {
@@ -274,11 +426,18 @@ globalThis.AccountTable = (() => {
         if (initialized) return;
         initialized = true;
         element('account-add').addEventListener('click', () => openEditor());
+        element('account-editor-paste').addEventListener('click', pasteIntoEditor);
+        element('account-editor-import-fill').addEventListener('click', importEditorJSON);
         element('account-editor-form').addEventListener('submit', saveEditor);
         element('account-editor-cancel').addEventListener('click', () => element('account-editor').close());
         element('account-editor-close').addEventListener('click', () => element('account-editor').close());
         element('account-editor').addEventListener('close', () => {
+            if (element('account-editor').open) return;
+            editorRevision += 1;
             element('account-editor-form').reset();
+            element('account-editor-import-json').value = '';
+            element('account-editor-import-status').textContent = '';
+            element('account-editor-error').textContent = '';
             editingId = null;
         });
         element('account-search').addEventListener('input', () => { page = 1; render(); });
@@ -288,6 +447,7 @@ globalThis.AccountTable = (() => {
         render();
     }
 
-    return {init, openEditor, saveAccount, removeAccount, loadGrouped, collectGrouped,
+    return {init, openEditor, fillEditor, pasteIntoEditor, parseAccounts, importAccounts,
+        saveAccount, removeAccount, loadGrouped, collectGrouped,
         count: () => rows.length, requiresReplacement: () => replacementNeeded};
 })();

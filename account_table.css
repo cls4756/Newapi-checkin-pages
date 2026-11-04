@@ -68,10 +68,22 @@
 .account-editor::backdrop { background: #0f172a99; }
 .account-editor-heading { margin-bottom: 20px; }
 .account-editor-heading h2 { font-size: 21px; }
+.account-editor-import { padding: 14px; margin-bottom: 20px; border: 1px dashed #cbd5e1; border-radius: 10px; background: #f8fafc; }
+.account-editor-import-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.account-editor-import details { margin-top: 12px; }
+.account-editor-import textarea { display: block; margin-bottom: 10px; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; color: inherit; font: inherit; resize: vertical; }
+.account-editor-import-status { margin-top: 12px; color: #0369a1; font-size: 13px; line-height: 1.7; }
+.account-editor-import-status:empty { display: none; }
+.account-editor button:disabled { opacity: .45; cursor: not-allowed; }
+.account-import-mode { display: grid; gap: 8px; margin-bottom: 16px; color: inherit; }
+.account-import-mode select { width: 100%; min-width: 0; box-sizing: border-box; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; color: #1e293b; font: inherit; }
+#bookmark-pending-info { overflow-wrap: anywhere; }
+.account-table-status[hidden], #bookmark-fill-btn[hidden], #bookmark-merge-btn[hidden], #bookmark-clear-btn[hidden] { display: none; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 .account-editor-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .account-editor-grid .form-group { margin-bottom: 0; min-width: 0; }
 .account-editor-wide { grid-column: 1 / -1; }
-.account-editor input { width: 100%; box-sizing: border-box; }
+.account-editor input, .account-editor textarea { width: 100%; box-sizing: border-box; }
 .account-editor label { color: inherit; }
 .account-editor small { display: block; line-height: 1.6; margin-top: 6px; color: #64748b; }
 .account-editor details { margin-top: 20px; }
@@ -86,7 +98,10 @@ html[data-theme="dark"] .account-table-panel {
     color: #e2e8f0;
 }
 html[data-theme="dark"] .account-editor { background: #0f172a; color: #e2e8f0; border-color: #334155; }
-html[data-theme="dark"] .account-editor input { background: #1e293b; color: #f1f5f9; border-color: #475569; }
+html[data-theme="dark"] .account-editor input, html[data-theme="dark"] .account-editor textarea,
+html[data-theme="dark"] .account-import-mode select { background: #1e293b; color: #f1f5f9; border-color: #475569; }
+html[data-theme="dark"] .account-editor-import { background: #1e293b; border-color: #475569; }
+html[data-theme="dark"] .account-editor-import-status { color: #7dd3fc; }
 html[data-theme="dark"] .account-editor small { color: #94a3b8; }
 html[data-theme="dark"] .account-table-status { color: #7dd3fc; }
 @media (max-width: 640px) {
