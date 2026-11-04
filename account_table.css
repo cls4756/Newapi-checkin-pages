@@ -50,6 +50,14 @@
 .account-table-status { color: #0369a1; margin-top: 10px; font-size: 13px; line-height: 1.7; }
 .account-table-status:empty { display: none; }
 .account-table-status.is-error, #account-editor-error { color: #dc2626; }
+#github-settings-panel { margin: 18px 0; padding: 18px; border: 1px solid #cbd5e1; border-radius: 12px; }
+#github-settings-panel > summary { cursor: pointer; font-weight: 600; margin-bottom: 16px; }
+#github-settings-summary, #github-vault-status { overflow-wrap: anywhere; line-height: 1.6; }
+.github-vault { border-top: 1px solid #cbd5e1; padding-top: 16px; margin: 18px 0; }
+.github-vault .cloud-fields { margin-top: 12px; }
+.github-section small { display: block; line-height: 1.7; }
+.github-section button:disabled { opacity: .5; cursor: wait; }
+html[data-theme="dark"] #github-settings-panel, html[data-theme="dark"] .github-vault { border-color: #475569; }
 .account-table-panel .btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
 .account-editor {
     position: fixed;

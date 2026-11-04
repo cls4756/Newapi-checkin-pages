@@ -71,12 +71,18 @@ globalThis.AccountTable = (() => {
                 || (account.cfClearanceEnv && !/^[A-Z_][A-Z0-9_]*$/.test(account.cfClearanceEnv))) {
             throw new Error('Secret / 环境变量名只能使用大写字母、数字和下划线，不能以数字开头');
         }
+        for (const name of [account.accessTokenEnv, account.cfClearanceEnv].filter(Boolean)) {
+            GitHubBrowserConfig.validateEnvName(name);
+        }
         return account;
     }
 
     function validateAccount(values, others, previous, usedNames = allocatedNames) {
         const account = validateFields(values);
         if (!account.accessTokenEnv) account.accessTokenEnv = previous?.accessTokenEnv || nextTokenName(others, usedNames);
+        if (account.cfClearance && !account.cfClearanceEnv) account.cfClearanceEnv = 'CF_CLEARANCE_' + account.accessTokenEnv;
+        GitHubBrowserConfig.validateEnvName(account.accessTokenEnv);
+        if (account.cfClearanceEnv) GitHubBrowserConfig.validateEnvName(account.cfClearanceEnv);
         if (others.some(row => identity(row) === identity(account))) {
             throw new Error('同一站点和用户 ID 的账号已存在，请编辑已有账号');
         }
@@ -194,11 +200,14 @@ globalThis.AccountTable = (() => {
         render();
         status(`已导入草稿：新增 ${added} 个、更新 ${updated} 个账号；未保存到浏览器或 GitHub。`
             + (replacementNeeded ? '保存到 GitHub 时需选择「替换账号列表」，请先确认完整列表。' : ''));
+        document.dispatchEvent(new CustomEvent('account-draft-changed'));
         return {added, updated, count: rows.length};
     }
 
-    function loadGrouped(sites) {
+    function loadGrouped(sites, history = []) {
         if (!Array.isArray(sites)) throw new Error('账号配置必须是数组');
+        if (!Array.isArray(history) || history.length > 10000) throw new Error('草稿变量名记录无效');
+        history.forEach(name => GitHubBrowserConfig.validateEnvName(name));
         const imported = [];
         sites.forEach(site => {
             if (!site || !Array.isArray(site.accounts)) throw new Error('站点配置缺少账号数组');
@@ -219,18 +228,23 @@ globalThis.AccountTable = (() => {
             });
         });
         if (imported.length > 200) throw new Error('最多支持 200 个账号');
-        allocatedNames = new Set(imported.flatMap(account => [account.accessTokenEnv, account.cfClearanceEnv]));
-        imported.forEach(account => {
-            if (!account.accessTokenEnv) account.accessTokenEnv = nextTokenName(imported);
-            allocatedNames.add(account.accessTokenEnv);
+        const stagedNames = new Set([...history, ...imported.flatMap(account => [account.accessTokenEnv, account.cfClearanceEnv].filter(Boolean))]);
+        const staged = [];
+        imported.forEach(values => {
+            const account = validateAccount(values, staged, null, stagedNames);
+            staged.push(account);
+            stagedNames.add(account.accessTokenEnv);
+            if (account.cfClearanceEnv) stagedNames.add(account.cfClearanceEnv);
         });
-        rows = imported.map(account => ({...account, id: nextId++}));
+        allocatedNames = stagedNames;
+        rows = staged.map(account => ({...account, id: nextId++}));
         replacementNeeded = false;
         page = 1;
         element('account-search').value = '';
         if (element('account-editor').open) element('account-editor').close();
         render();
         status('已加载 ' + rows.length + ' 个账号；表格不会显示真实令牌、Cookie 或密码。');
+        document.dispatchEvent(new CustomEvent('account-draft-changed'));
     }
 
     function collectGrouped() {
@@ -419,6 +433,7 @@ globalThis.AccountTable = (() => {
         status(rows.length
             ? '已从草稿删除账号；保存到 GitHub 时需选择「替换账号列表」，不会删除已有 Secrets。'
             : '当前草稿已清空；GitHub 同步至少需要保留一个账号。');
+        document.dispatchEvent(new CustomEvent('account-draft-changed'));
         return true;
     }
 
@@ -449,5 +464,7 @@ globalThis.AccountTable = (() => {
 
     return {init, openEditor, fillEditor, pasteIntoEditor, parseAccounts, importAccounts,
         saveAccount, removeAccount, loadGrouped, collectGrouped,
-        count: () => rows.length, requiresReplacement: () => replacementNeeded};
+        count: () => rows.length, requiresReplacement: () => replacementNeeded,
+        refresh: render, allocationHistory: () => [...allocatedNames],
+        markReplacement: value => { replacementNeeded = value === true; }};
 })();

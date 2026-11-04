@@ -1102,10 +1102,10 @@
             var b = document.getElementById('themeToggle');
             if (b) { b.textContent = t === 'dark' ? '☀️' : '🌙'; }
         }
-        apply(localStorage.getItem(KEY));
+        try { apply(localStorage.getItem(KEY)); } catch { apply(null); }
         window.toggleTheme = function () {
             var t = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-            localStorage.setItem(KEY, t);
+            try { localStorage.setItem(KEY, t); } catch {}
             apply(t);
         };
     })();
@@ -1140,7 +1140,7 @@
 
             <div class="btn-container">
                 <a href="config_generator.html" class="btn">🛠️ 打开配置生成器</a>
-                <a href="https://github.com/Jasonliu-0/Newapi-checkin" class="btn btn-secondary" target="_blank">📖 查看完整文档</a>
+                <a href="https://github.com/cls4756/Newapi-checkin-pages" class="btn btn-secondary" target="_blank">📖 查看完整文档</a>
             </div>
         </div>
 

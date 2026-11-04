@@ -8,9 +8,13 @@ on:
       - 'dashboard.html'
       - 'account_table.js'
       - 'account_table.css'
+      - 'account_exports.js'
       - 'github_config_ui.js'
+      - 'github_settings.js'
       - 'github_browser_config.js'
       - 'vendor/**'
+      - 'tests/**'
+      - '.gitattributes'
       - 'scripts/build_pages.py'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
@@ -40,15 +44,30 @@ jobs:
             /dashboard.html
             /account_table.js
             /account_table.css
+            /account_exports.js
             /github_config_ui.js
+            /github_settings.js
             /github_browser_config.js
             /vendor/
+            /tests/
+            /.gitattributes
             /scripts/build_pages.py
 
       - name: Set up Python for static packaging
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
+      - name: Set up Node for offline configuration checks
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Validate encryption, exports and mocked GitHub saves
+        run: |
+          node tests/test_github_settings.js
+          node tests/test_account_exports.js
+          node tests/test_github_browser_config.js
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

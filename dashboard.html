@@ -198,8 +198,8 @@
 
     <div class="container">
         <div class="header">
-            <h1>📊 签到历史仪表盘</h1>
-            <p>各账号的签到记录与额度奖励一览（数据实时从站点拉取）</p>
+            <h1>📊 实时签到查询</h1>
+            <p>通过本地服务读取站点记录，不是 GitHub Actions 运行历史</p>
         </div>
 
         <div class="content">
@@ -226,7 +226,8 @@
     <script>
         // 主题
         (function () {
-            var t = localStorage.getItem('newapi_theme');
+            var t;
+            try { t = localStorage.getItem('newapi_theme'); } catch {}
             if (t === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
             var b = document.getElementById('themeToggle');
             if (b) b.textContent = t === 'dark' ? '☀️' : '🌙';
@@ -235,7 +236,7 @@
             var t = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
             if (t === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
             else document.documentElement.removeAttribute('data-theme');
-            localStorage.setItem('newapi_theme', t);
+            try { localStorage.setItem('newapi_theme', t); } catch {}
             document.getElementById('themeToggle').textContent = t === 'dark' ? '☀️' : '🌙';
         }
 
@@ -251,14 +252,18 @@
         }
 
         function fmtQuota(q) {
-            if (!q && q !== 0) return '-';
+            if (typeof q !== 'number' || !Number.isFinite(q)) return '-';
             const usd = q / 500000;
             return q.toLocaleString() + ' tokens（$' + usd.toFixed(2) + '）';
         }
 
         function getAccounts() {
             let sites = [];
-            try { sites = JSON.parse(localStorage.getItem('newapi_checkin_accounts') || '[]'); } catch (e) {}
+            try {
+                const saved = JSON.parse(localStorage.getItem('newapi_checkin_accounts') || '[]');
+                sites = Array.isArray(saved) ? saved : saved.version === 1 ? saved.sites : [];
+            } catch (e) {}
+            if (!Array.isArray(sites)) return [];
             const out = [];
             (sites || []).forEach(site => {
                 (site.accounts || []).forEach(acc => {
@@ -279,7 +284,8 @@
 
         async function loadAccount(acc, month) {
             const headers = {};
-            if (acc.accessToken) headers['Authorization'] = acc.accessToken;
+            if (acc.accessToken) headers['Authorization'] = 'Bearer ' + acc.accessToken.replace(/^Bearer\s+/i, '');
+            else if (acc.session) headers['Cookie'] = 'session=' + acc.session;
             if (acc.userId) headers['New-Api-User'] = String(acc.userId);
 
             const out = { name: acc.name, url: acc.url, error: null, self: null, stats: null };
@@ -289,7 +295,7 @@
                 const r1 = await proxyGet(acc.url + '/api/user/self', headers);
                 try {
                     const j1 = JSON.parse(r1.text);
-                    if (j1.success) out.self = j1.data;
+                    if (r1.status >= 200 && r1.status < 300 && j1.success === true) out.self = j1.data;
                 } catch (e) {}
             } catch (e) {}
 
@@ -297,10 +303,12 @@
             try {
                 const r2 = await proxyGet(acc.url + '/api/user/checkin?month=' + month, headers);
                 const j2 = JSON.parse(r2.text);
-                if (j2.success && j2.data && j2.data.stats) out.stats = j2.data.stats;
+                if (r2.status >= 200 && r2.status < 300 && j2.success === true && j2.data && j2.data.stats) {
+                    out.stats = {...j2.data.stats, records: j2.data.records || j2.data.stats.records || []};
+                }
                 else out.error = j2.message || ('HTTP ' + r2.status);
             } catch (e) {
-                out.error = '请求失败: ' + e.message + '（可能是 CF 拦截）';
+                out.error = '查询失败，请检查本地代理、站点接口响应及网络；此错误不能单独判断是 CF 拦截。';
             }
             return out;
         }
@@ -332,12 +340,12 @@
                 const s = info.stats;
                 html += `<div class="stat-chips">
                     <span class="stat-chip ${s.checked_in_today ? 'ok' : ''}">${s.checked_in_today ? '✅ 今日已签' : '⭕ 今日未签'}</span>
-                    <span class="stat-chip">📅 本月 ${s.checkin_count} 次</span>
-                    <span class="stat-chip">🏆 累计 ${s.total_checkins} 天</span>
+                    <span class="stat-chip">📅 本月 ${esc(s.checkin_count)} 次</span>
+                    <span class="stat-chip">🏆 累计 ${esc(s.total_checkins)} 天</span>
                     <span class="stat-chip">💰 累计 ${fmtQuota(s.total_quota)}</span>
                 </div>`;
 
-                const recs = (s.records || []).slice().sort((a, b) => a.checkin_date < b.checkin_date ? -1 : 1);
+                const recs = (Array.isArray(s.records) ? s.records : []).filter(r => r && typeof r.quota_awarded === 'number' && Number.isFinite(r.quota_awarded)).slice().sort((a, b) => a.checkin_date < b.checkin_date ? -1 : 1);
                 if (recs.length) {
                     const max = Math.max(...recs.map(r => r.quota_awarded), 1);
                     html += '<div style="margin-top: 6px;">';
@@ -360,14 +368,21 @@
             return card;
         }
 
+        let queryRevision = 0;
         async function loadAll() {
+            const revision = ++queryRevision;
             const month = document.getElementById('month-input').value;
             const cards = document.getElementById('cards');
+            if (location.protocol !== 'http:' || !['localhost', '127.0.0.1'].includes(location.hostname)) {
+                cards.textContent = '公开 Pages 没有本地查询代理。请在签到程序所在设备启动 serve.py，并在对应本地页面保存账号凭证后查询。只保存 Secret 变量名无法读取令牌；Actions 执行记录请到签到配置仓库查看。';
+                return;
+            }
+            if (!/^\d{4}-\d{2}$/.test(month)) { cards.textContent = '请选择查询月份'; return; }
             const accounts = getAccounts();
 
             if (!accounts.length) {
                 cards.innerHTML = `<div class="empty">📋 浏览器本地存储中没有账号配置。<br>
-                    请先在 <a href="config_generator.html">配置生成器</a> 中填写并「保存到本地」。</div>`;
+                    请先在本地的 <a href="config_generator.html">配置页</a> 填写账号凭证并「保存浏览器草稿」。只含变量名的账号无法在浏览器中读取 GitHub Secrets。</div>`;
                 return;
             }
 
@@ -376,6 +391,7 @@
             const container = document.createDocumentFragment();
             for (const acc of accounts) {
                 const info = await loadAccount(acc, month);
+                if (revision !== queryRevision) return;
                 container.appendChild(renderCard(acc, info));
             }
             cards.innerHTML = '';
@@ -383,9 +399,9 @@
         }
 
         // 初始化
-        document.getElementById('month-input').value = new Date().toISOString().slice(0, 7);
+        document.getElementById('month-input').value = new Date().getFullYear() + '-' + String(new Date().getMonth() + 1).padStart(2, '0');
         document.getElementById('month-input').addEventListener('change', loadAll);
-        if (localStorage.getItem('newapi_theme') !== 'dark') loadAll();
+        loadAll();
     </script>
 </body>
 </html>

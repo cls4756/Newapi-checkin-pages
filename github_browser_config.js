@@ -3,7 +3,7 @@ globalThis.GitHubBrowserConfig = (() => {
     const workflowFiles = ['.github/workflows/checkin.yml', '.github/workflows/checkin-gha-test.yml'];
     const publicFields = new Set(['url', 'user_id', 'name', 'access_token_env', 'cf_clearance_env']);
     const reservedNames = new Set([
-        'NEWAPI_CONFIG_FILE', 'NEWAPI_ACCOUNTS', 'CONFIG_URL', 'CONFIG_AUTH', 'NOTIFY_ONLY_FAILURE',
+        'NEWAPI_CONFIG_FILE', 'NEWAPI_ACCOUNTS', 'NEWAPI_PROXY', 'NEWAPI_CAPTCHA_OCR', 'CONFIG_URL', 'CONFIG_AUTH', 'NOTIFY_ONLY_FAILURE',
         'PATH', 'HOME', 'PYTHONPATH', 'PYTHONHOME', 'LD_PRELOAD', 'LD_LIBRARY_PATH', 'BASH_ENV', 'ENV',
         'DINGTALK_WEBHOOK', 'DINGTALK_SECRET', 'SERVERCHAN_SENDKEY', 'PUSHPLUS_TOKEN', 'EMAIL_SMTP_HOST',
         'EMAIL_SMTP_PORT', 'EMAIL_USER', 'EMAIL_PASS', 'EMAIL_TO', 'EMAIL_FROM'
@@ -518,6 +518,9 @@ globalThis.GitHubBrowserConfig = (() => {
                 if (/[\x00-\x1f\x7f]/.test(value)) throw new Error('令牌不能包含换行或控制字符');
                 if (value) providedValues[name] = value;
             }
+            if (Object.keys(providedValues).length && !flags.include_env && !flags.sync_secrets) {
+                throw new Error('已填写令牌，请选择同步 Secrets 或私有仓库 .env，避免丢失凭证');
+            }
             const files = new Map([[accountFile, JSON.stringify(accounts, null, 2) + '\n']]);
             for (const path of workflowFiles) {
                 const content = await snapshot.read(path);
@@ -571,6 +574,6 @@ globalThis.GitHubBrowserConfig = (() => {
         }
     }
 
-    return Object.freeze({handle, validateAccounts, mergeAccounts, envNames, updateWorkflow, updatePushplusWorkflow,
+    return Object.freeze({handle, validateAccounts, validateEnvName, mergeAccounts, envNames, updateWorkflow, updatePushplusWorkflow,
         envValues, updateEnvContent, encryptSecrets});
 })();

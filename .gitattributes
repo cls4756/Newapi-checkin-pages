@@ -1,0 +1,3 @@
+# Preserve the published vendor bytes required by Subresource Integrity.
+vendor/libsodium.js -text
+vendor/libsodium-wrappers.js -text
