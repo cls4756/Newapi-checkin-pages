@@ -82,7 +82,7 @@ globalThis.GitHubSettings = (() => {
 
     async function encrypt(token, password) {
         token = validateToken(token);
-        if (typeof password !== 'string' || password.length < 10) throw new Error('保存 PAT 时请设置至少 10 个字符的解锁密码');
+        if (typeof password !== 'string' || password.length < 5) throw new Error('保存 PAT 时请设置至少 5 个字符的解锁密码');
         if (!available()) throw new Error('当前浏览器不支持安全加密，请使用 HTTPS 或本地服务打开页面');
         const salt = crypto.getRandomValues(new Uint8Array(16));
         const iv = crypto.getRandomValues(new Uint8Array(12));

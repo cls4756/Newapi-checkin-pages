@@ -29,7 +29,8 @@ const storage = {getItem: key => values.get(key), setItem: (key, value) => value
     const corrupt = {...vault, ciphertext: Buffer.alloc(40).toString('base64')};
     await assert.rejects(() => settings.decrypt(corrupt, password), /解锁失败/);
     await assert.rejects(() => settings.decrypt({...vault, iterations: 1}, password), /格式无效/);
-    await assert.rejects(() => settings.encrypt(token, 'short'), /至少 10/);
+    await assert.rejects(() => settings.encrypt(token, 'four'), /至少 5/);
+    assert.equal(await settings.decrypt(await settings.encrypt(token, 'short'), 'short'), token);
     assert.throws(() => settings.write(old, null, {setItem() { throw new Error(token); }}), error => !error.message.includes(token));
     settings.write(settings.read(storage), null, storage);
     assert.equal(settings.read(storage).vault, null);
