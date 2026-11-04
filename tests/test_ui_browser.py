@@ -38,9 +38,20 @@ class BrowserTests(unittest.TestCase):
         self.network = []
         self.errors = []
         self.context.route('**/*', self.route)
+        self.context.add_init_script('''document.addEventListener('DOMContentLoaded', () => {
+            if (!globalThis.GitHubBrowserConfig) return;
+            window.githubLoadCalls = [];
+            window.GitHubBrowserConfig = {...GitHubBrowserConfig, handle: async payload => {
+                if (payload.action !== 'load') throw new Error('Unexpected unmocked save');
+                githubLoadCalls.push(payload);
+                return {accounts: JSON.parse(sessionStorage.getItem('fictional-remote-accounts') || '[]'),
+                    branch: payload.branch || 'main', private: true};
+            }};
+        });''')
         self.page = self.context.new_page()
         self.page.set_default_timeout(7000)
-        self.dialog_handler = lambda dialog: dialog.accept()
+        self.dialogs = []
+        self.dialog_handler = lambda dialog: (self.dialogs.append(dialog.message), dialog.accept())
         self.page.on('dialog', self.dialog_handler)
         self.page.on('pageerror', lambda error: self.errors.append(str(error)))
         self.page.goto('https://ui.invalid/config_generator.html')
@@ -62,21 +73,48 @@ class BrowserTests(unittest.TestCase):
                 self.network.append(route.request.method + ' ' + parsed.path)
             route.abort()
 
+    def open_settings(self):
+        if not self.page.locator('#github-settings-dialog').is_visible():
+            self.page.get_by_role('button', name='⚙️ 设置', exact=True).click()
+        expect(self.page.locator('#github-settings-dialog')).to_be_visible()
+
+    def open_sync(self):
+        if not self.page.locator('#github-section').is_visible():
+            self.page.get_by_role('button', name='🐙 GitHub 同步', exact=True).click()
+
+    def submit_settings(self):
+        self.page.get_by_role('button', name='💾 保存设置', exact=True).click()
+        expect(self.page.locator('#github-settings-dialog')).to_be_hidden()
+        self.page.wait_for_function('!githubBusy')
+
+    def unlock_settings(self):
+        self.open_settings()
+        self.page.locator('#github-vault-password').fill('fictional-password')
+        self.page.get_by_role('button', name='🔓 解锁 PAT', exact=True).click()
+        expect(self.page.locator('#github-settings-dialog')).to_be_hidden()
+        expect(self.page.locator('#github-settings-summary')).to_contain_text('PAT 已解锁')
+        self.page.wait_for_function('!githubBusy')
+
     def save_settings(self):
-        self.page.get_by_role('button', name='⚙️ 设置', exact=True).click()
+        self.open_settings()
         self.page.locator('#github-repository').fill('fictional-owner/config')
         self.page.locator('#github-branch').fill('main')
         self.page.locator('#github-token').fill('fictional-pat')
         self.page.locator('#github-remember-token').check()
         self.page.locator('#github-vault-password').fill('fictional-password')
         self.page.locator('#github-vault-confirm').fill('fictional-password')
-        self.page.get_by_role('button', name='💾 仅保存浏览器设置', exact=True).click()
-        expect(self.page.locator('#github-status')).to_contain_text('设置已保存')
+        self.submit_settings()
+        expect(self.page.locator('#github-table-status')).to_contain_text('已加载')
+        self.open_sync()
 
     def dismiss_dialogs(self):
         self.page.remove_listener('dialog', self.dialog_handler)
-        self.dialog_handler = lambda dialog: dialog.dismiss()
+        self.dialog_handler = lambda dialog: (self.dialogs.append(dialog.message), dialog.dismiss())
         self.page.on('dialog', self.dialog_handler)
+
+    def remote_account(self, name):
+        self.page.evaluate('''name => sessionStorage.setItem('fictional-remote-accounts', JSON.stringify([
+            {url:'https://fictional-remote.example',user_id:'456',name,access_token_env:'REMOTE_TOKEN'}]))''', name)
 
     def add_account(self):
         self.page.locator('#account-add').click()
@@ -93,6 +131,7 @@ class BrowserTests(unittest.TestCase):
             window.githubCalls = [];
             window.GitHubBrowserConfig = {...GitHubBrowserConfig, handle: async payload => {
                 githubCalls.push(payload);
+                if (payload.action === 'load') return {accounts: [], branch: 'main', private: true};
                 return {accounts: payload.accounts, account_count: payload.accounts.length, branch: 'main',
                     changed_files: ['accounts.config.json'], saved_secrets: partial ? [] : ['FICTIONAL_TOKEN'],
                     failed_secrets: partial ? ['FICTIONAL_TOKEN'] : [], complete: !partial,
@@ -108,26 +147,158 @@ class BrowserTests(unittest.TestCase):
         self.assertNotIn('fictional-password', stored)
         self.assertEqual(self.context.cookies(), [])
         self.page.reload()
-        self.page.get_by_role('button', name='⚙️ 设置', exact=True).click()
+        expect(self.page.locator('#github-settings-dialog')).to_be_visible()
         expect(self.page.locator('#github-repository')).to_have_value('fictional-owner/config')
         expect(self.page.locator('#github-vault-status')).to_contain_text('请解锁')
         self.page.locator('#github-vault-password').fill('wrong-password')
         self.page.get_by_role('button', name='🔓 解锁 PAT', exact=True).click()
-        expect(self.page.locator('#github-status')).to_contain_text('解锁失败')
-        self.page.locator('#github-vault-password').fill('fictional-password')
-        self.page.get_by_role('button', name='🔓 解锁 PAT', exact=True).click()
-        expect(self.page.locator('#github-status')).to_contain_text('PAT 已解锁')
+        expect(self.page.locator('#github-settings-status')).to_contain_text('解锁失败')
+        self.assertEqual(self.page.evaluate('githubLoadCalls.length'), 0)
+        self.unlock_settings()
+        expect(self.page.locator('#github-table-status')).to_contain_text('已加载 0 个账号')
+        self.assertEqual(self.page.evaluate('githubLoadCalls.length'), 1)
         expect(self.page.locator('#github-vault-password')).to_have_value('')
         self.add_account()
         self.mock_github()
+        self.open_sync()
         self.page.get_by_role('button', name='🐙 确认并保存到 GitHub', exact=True).click()
         expect(self.page.locator('#github-status')).to_contain_text('已保存 1 个账号')
         self.assertEqual(self.page.evaluate('githubCalls.length'), 1)
         self.assertEqual(self.page.evaluate('githubCalls[0].token'), 'fictional-pat')
+        self.open_settings()
         self.page.get_by_role('button', name='🔒 立即锁定', exact=True).click()
         expect(self.page.locator('#github-vault-status')).to_contain_text('请解锁')
         self.page.get_by_role('button', name='删除已保存的 PAT', exact=True).click()
         expect(self.page.locator('#github-vault-status')).to_contain_text('PAT 未保存')
+
+    def test_settings_modal_cancel_restores_options_and_clears_sensitive_inputs(self):
+        self.save_settings()
+        saved = self.page.evaluate('JSON.stringify(localStorage)')
+        for action in ('cancel', 'escape', 'close'):
+            self.open_settings()
+            self.assertTrue(self.page.locator('#github-settings-dialog').evaluate('dialog => dialog.matches(":modal")'))
+            self.page.locator('#github-repository').fill('fictional-owner/unsaved')
+            self.page.locator('#github-save-mode').select_option('replace')
+            self.page.locator('#github-token').fill('unsaved-fictional-token')
+            self.page.locator('#github-vault-password').fill('unsaved-fictional-password')
+            if action == 'escape':
+                self.page.keyboard.press('Escape')
+            elif action == 'close':
+                self.page.get_by_role('button', name='关闭 GitHub 设置', exact=True).click()
+            else:
+                self.page.locator('#github-settings-dialog').get_by_role('button', name='取消', exact=True).click()
+            expect(self.page.locator('#github-settings-dialog')).to_be_hidden()
+            expect(self.page.locator('#github-repository')).to_have_value('fictional-owner/config')
+            expect(self.page.locator('#github-save-mode')).to_have_value('merge')
+            expect(self.page.locator('#github-token')).to_have_value('')
+            expect(self.page.locator('#github-vault-password')).to_have_value('')
+            self.assertEqual(self.page.evaluate('JSON.stringify(localStorage)'), saved)
+            self.assertEqual(self.page.evaluate('githubLoadCalls.length'), 1)
+        self.page.set_viewport_size({'width': 375, 'height': 667})
+        self.open_settings()
+        for selector in ('#github-settings-dialog', '.github-settings-footer'):
+            box = self.page.locator(selector).bounding_box()
+            self.assertGreaterEqual(box['x'], 0)
+            self.assertGreaterEqual(box['y'], 0)
+            self.assertLessEqual(box['x'] + box['width'], 375)
+            self.assertLessEqual(box['y'] + box['height'], 667)
+        self.page.locator('#github-branch').fill('fictional-branch')
+        self.submit_settings()
+        expect(self.page.locator('#github-table-status')).to_contain_text('分支：fictional-branch')
+
+    def test_reload_unlocks_then_reads_latest_github_instead_of_browser_draft(self):
+        self.save_settings()
+        self.add_account()
+        self.page.get_by_role('button', name='💾 保存浏览器草稿', exact=True).click()
+        self.remote_account('Latest remote account')
+        self.dialogs.clear()
+        self.page.reload()
+        expect(self.page.locator('#github-settings-dialog')).to_be_visible()
+        expect(self.page.locator('#github-vault-password')).to_be_focused()
+        self.assertEqual(self.page.evaluate('githubLoadCalls.length'), 0)
+        expect(self.page.locator('#account-count')).to_contain_text('0 个账号')
+        self.unlock_settings()
+        expect(self.page.get_by_role('button', name='编辑账号：Latest remote account', exact=True)).to_be_visible()
+        self.assertEqual(self.page.evaluate('githubLoadCalls.length'), 1)
+        self.assertEqual(self.page.evaluate('githubLoadCalls[0].action'), 'load')
+        self.assertEqual(self.dialogs, [])
+        self.assertEqual(self.page.evaluate('AccountTable.collectGrouped()[0].accounts[0].accessToken'), '')
+
+    def test_refresh_reads_latest_and_failed_refresh_preserves_current_rows(self):
+        self.remote_account('Original remote account')
+        self.save_settings()
+        expect(self.page.get_by_role('button', name='编辑账号：Original remote account', exact=True)).to_be_visible()
+        self.remote_account('Updated remote account')
+        self.page.get_by_role('button', name='🔄 刷新账号', exact=True).click()
+        expect(self.page.get_by_role('button', name='编辑账号：Updated remote account', exact=True)).to_be_visible()
+        self.assertEqual(self.page.evaluate('githubLoadCalls.length'), 2)
+        self.assertEqual(self.dialogs, [])
+        self.page.evaluate('() => { GitHubBrowserConfig.handle = async () => { throw new TypeError("Fictional offline"); }; }')
+        self.page.get_by_role('button', name='🐙 GitHub 同步', exact=True).click()
+        self.page.get_by_role('button', name='🔄 刷新账号', exact=True).click()
+        expect(self.page.locator('#github-table-status')).to_contain_text('连接 GitHub API 失败')
+        expect(self.page.get_by_role('button', name='编辑账号：Updated remote account', exact=True)).to_be_visible()
+        expect(self.page.locator('#account-add')).to_be_enabled()
+
+    def test_refresh_cancel_preserves_edits_and_deletion_of_last_account(self):
+        self.save_settings()
+        self.add_account()
+        self.dismiss_dialogs()
+        self.page.get_by_role('button', name='🔄 刷新账号', exact=True).click()
+        self.assertEqual(self.page.evaluate('githubLoadCalls.length'), 1)
+        expect(self.page.locator('#account-count')).to_contain_text('1 个账号')
+        self.assertIn('覆盖当前账号', self.dialogs[-1])
+        self.page.evaluate('''() => {
+            const original = window.confirm;
+            window.confirm = () => true;
+            document.querySelector('[aria-label="删除账号：Fictional account"]').click();
+            window.confirm = original;
+        }''')
+        expect(self.page.locator('#account-count')).to_contain_text('0 个账号')
+        self.page.get_by_role('button', name='🔄 刷新账号', exact=True).click()
+        self.assertEqual(self.page.evaluate('githubLoadCalls.length'), 1)
+        self.assertTrue(self.page.evaluate('AccountTable.requiresReplacement()'))
+        self.assertEqual(len(self.dialogs), 2)
+
+    def test_refresh_cancel_preserves_unsaved_pushplus_even_with_empty_table(self):
+        self.save_settings()
+        self.page.locator('#github-pushplus-mode').select_option('enable')
+        self.page.locator('#github-pushplus-token').fill('fictional-pushplus-token')
+        self.dismiss_dialogs()
+        self.page.get_by_role('button', name='🔄 刷新账号', exact=True).click()
+        expect(self.page.locator('#github-pushplus-token')).to_have_value('fictional-pushplus-token')
+        self.assertEqual(self.page.evaluate('githubLoadCalls.length'), 1)
+        self.assertIn('PushPlus', self.dialogs[-1])
+
+    def test_manual_load_continues_after_unlock_without_saving_preference_edits(self):
+        self.save_settings()
+        self.open_settings()
+        self.page.get_by_role('button', name='🔒 立即锁定', exact=True).click()
+        self.page.get_by_role('button', name='关闭 GitHub 设置', exact=True).click()
+        self.remote_account('Loaded after unlock')
+        self.page.get_by_role('button', name='📥 从 GitHub 加载', exact=True).click()
+        expect(self.page.locator('#github-settings-dialog')).to_be_visible()
+        self.page.locator('#github-repository').fill('fictional-owner/unsaved')
+        self.unlock_settings()
+        expect(self.page.get_by_role('button', name='编辑账号：Loaded after unlock', exact=True)).to_be_visible()
+        self.assertEqual(self.page.evaluate('githubLoadCalls[1].repository'), 'fictional-owner/config')
+        self.assertIn('覆盖当前账号', self.dialogs[-1])
+
+    def test_bookmark_editor_opens_after_initial_github_load_or_cancelled_unlock(self):
+        self.save_settings()
+        self.remote_account('Remote before import')
+        self.page.goto('https://ui.invalid/config_generator.html?fictional=load#add-account')
+        expect(self.page.locator('#github-settings-dialog')).to_be_visible()
+        expect(self.page.locator('#account-editor')).to_be_hidden()
+        self.unlock_settings()
+        expect(self.page.locator('#account-editor')).to_be_visible()
+        expect(self.page.locator('#account-editor-import-status')).to_contain_text('抓取结果只在剪贴板')
+        expect(self.page.locator('#account-count')).to_contain_text('1 个账号')
+        self.page.goto('https://ui.invalid/config_generator.html?fictional=cancel#add-account')
+        expect(self.page.locator('#github-settings-dialog')).to_be_visible()
+        self.page.get_by_role('button', name='关闭 GitHub 设置', exact=True).click()
+        expect(self.page.locator('#account-editor')).to_be_visible()
+        self.assertEqual(self.page.evaluate('githubLoadCalls.length'), 0)
 
     def test_exports_include_all_pages_and_are_invalidated_after_edit(self):
         self.add_account()
@@ -152,17 +323,18 @@ class BrowserTests(unittest.TestCase):
         self.page.get_by_role('button', name='删除账号：Remove me', exact=True).click()
         self.page.get_by_role('button', name='💾 保存浏览器草稿', exact=True).click()
         self.page.reload()
+        self.unlock_settings()
         self.page.get_by_role('button', name='📂 加载浏览器草稿', exact=True).click()
         self.assertTrue(self.page.evaluate('AccountTable.requiresReplacement()'))
-        self.page.get_by_role('button', name='⚙️ 设置', exact=True).click()
-        self.page.locator('#github-vault-password').fill('fictional-password')
-        self.page.get_by_role('button', name='🔓 解锁 PAT', exact=True).click()
-        expect(self.page.locator('#github-status')).to_contain_text('PAT 已解锁')
         self.mock_github()
+        self.open_sync()
         self.page.get_by_role('button', name='🐙 确认并保存到 GitHub', exact=True).click()
         expect(self.page.locator('#github-status')).to_contain_text('合并模式无法删除')
         self.assertEqual(self.page.evaluate('githubCalls.length'), 0)
+        self.open_settings()
         self.page.locator('#github-save-mode').select_option('replace')
+        self.submit_settings()
+        self.assertEqual(self.page.evaluate('githubCalls.length'), 0)
         self.page.get_by_role('button', name='🐙 确认并保存到 GitHub', exact=True).click()
         expect(self.page.locator('#github-status')).to_contain_text('已保存 1 个账号')
 
@@ -185,7 +357,8 @@ class BrowserTests(unittest.TestCase):
         self.page.locator('#github-pushplus-mode').select_option('enable')
         self.page.locator('#github-pushplus-token').fill('fictional-pushplus-token')
         self.page.locator('#github-pushplus-only-failure').check()
-        self.page.get_by_role('button', name='💾 仅保存浏览器设置', exact=True).click()
+        self.open_settings()
+        self.submit_settings()
         expect(self.page.locator('#github-pushplus-token')).to_be_enabled()
         self.mock_github(partial=True)
         self.page.get_by_role('button', name='🐙 确认并保存到 GitHub', exact=True).click()
@@ -211,13 +384,14 @@ class BrowserTests(unittest.TestCase):
 
     def test_options_restore_and_pages_never_enables_local_file_writes(self):
         self.save_settings()
+        self.open_settings()
         self.page.locator('#github-save-mode').select_option('replace')
         self.page.locator('#github-sync-secrets').uncheck()
         self.page.locator('#github-include-env').check()
-        self.page.get_by_role('button', name='💾 仅保存浏览器设置', exact=True).click()
+        self.submit_settings()
         expect(self.page.locator('#github-status')).to_contain_text('设置已保存')
         self.page.reload()
-        self.page.get_by_role('button', name='⚙️ 设置', exact=True).click()
+        self.open_settings()
         expect(self.page.locator('#github-save-mode')).to_have_value('replace')
         expect(self.page.locator('#github-sync-secrets')).not_to_be_checked()
         expect(self.page.locator('#github-include-env')).to_be_checked()
@@ -267,9 +441,11 @@ class BrowserTests(unittest.TestCase):
         self.page.get_by_role('button', name='⚙️ 设置', exact=True).click()
         self.page.locator('#github-repository').fill('fictional-owner/config')
         self.page.locator('#github-token').fill('fictional-pat')
-        self.page.get_by_role('button', name='💾 仅保存浏览器设置', exact=True).click()
-        expect(self.page.locator('#github-status')).to_contain_text('无法读取浏览器设置')
+        self.page.get_by_role('button', name='💾 保存设置', exact=True).click()
+        expect(self.page.locator('#github-settings-status')).to_contain_text('无法读取浏览器设置')
         expect(self.page.locator('#github-token')).to_have_value('fictional-pat')
+        self.page.get_by_role('button', name='关闭 GitHub 设置', exact=True).click()
+        expect(self.page.locator('#github-settings-dialog')).to_be_hidden()
         expect(self.page.locator('#account-add')).to_be_enabled()
         expect(self.page.locator('#account-count')).to_contain_text('1 个账号')
 

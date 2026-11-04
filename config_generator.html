@@ -4037,10 +4037,13 @@
                         <p id="account-count" aria-live="polite">0 个账号 · 0 个站点</p>
                     </div>
                     <div class="btn-group">
+                        <button type="button" class="btn btn-secondary" onclick="refreshGithubAccounts()">🔄 刷新账号</button>
                         <button type="button" class="btn btn-secondary" onclick="openGithubSettings()">⚙️ 设置</button>
                         <button type="button" class="btn btn-primary" id="account-add">➕ 添加账号</button>
                     </div>
                 </div>
+                <p id="github-settings-summary" class="account-table-help" role="status">尚未保存 GitHub 设置</p>
+                <div id="github-table-status" class="cloud-status" role="status" aria-live="polite"></div>
                 <div class="account-table-toolbar">
                     <label class="account-search-field">
                         <input type="search" id="account-search" aria-label="搜索账号" placeholder="搜索站点、备注、用户 ID 或变量名">
@@ -4170,68 +4173,85 @@
                 <button class="btn btn-secondary btn-clear" onclick="clearLocal()">🗑️ 清除浏览器草稿</button>
             </div>
 
+            <dialog id="github-settings-dialog" class="account-editor github-section github-settings-dialog" aria-labelledby="github-settings-title" aria-describedby="github-settings-description">
+                <form id="github-settings-form" novalidate autocomplete="off">
+                    <div class="account-editor-heading github-settings-heading">
+                        <div>
+                            <h2 id="github-settings-title">⚙️ GitHub 同步设置</h2>
+                            <p id="github-settings-description">设置保存在当前浏览器；重新打开页面，解锁后自动加载 GitHub 最新账号。</p>
+                        </div>
+                        <button type="button" class="btn btn-secondary btn-xs" onclick="closeGithubSettings()" aria-label="关闭 GitHub 设置">✕</button>
+                    </div>
+                    <div class="github-settings-body">
+                        <div class="cloud-fields">
+                            <div class="form-group">
+                                <label for="github-repository">签到配置仓库 <span class="required">*</span></label>
+                                <input type="text" id="github-repository" placeholder="owner/Newapi-checkin" autocomplete="off">
+                                <small>填写存放签到程序和账号的 owner/repo；不要填公开界面仓库 cls4756/Newapi-checkin-pages。建议先加载完整账号列表。</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="github-branch">目标分支</label>
+                                <input type="text" id="github-branch" placeholder="留空使用仓库默认分支" autocomplete="off">
+                                <small>直接提交到该分支；分支保护或仓库规则可能阻止保存</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="github-token">GitHub Personal Access Token <span class="required">*</span></label>
+                                <input type="password" id="github-token" placeholder="首次保存或更换 PAT 时填写；解锁后无需重复填写" autocomplete="off" spellcheck="false">
+                                <small>Fine-grained PAT：选定仓库，Contents 和 Workflows 读写；同步 Secrets 还需 Secrets 读写。未选择加密保存时仅供当前页面使用。</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="github-save-mode">账号保存方式</label>
+                                <select id="github-save-mode">
+                                    <option value="merge">合并新增 / 更新（推荐，保留远端其他账号）</option>
+                                    <option value="replace">替换账号列表（用于删除账号，保留其他工作流设置）</option>
+                                </select>
+                                <small>同一 URL + 用户 ID 视为同一账号；不同账号的令牌变量名必须独立</small>
+                            </div>
+                        </div>
+                        <div class="github-options">
+                            <label><input type="checkbox" id="github-sync-secrets" checked><span>自动创建 / 更新 Actions Secrets：使用 GitHub 公钥在当前设备加密后上传；留空保留已有 Secret</span></label>
+                            <label><input type="checkbox" id="github-include-env"><span>同时提交明文 .env（仅私有仓库）。我确认：凭证进入 Git 历史，私有仓库不能保证绝不泄露；首次导入的文件会包含其中的全部变量</span></label>
+                            <label id="github-local-option"><input type="checkbox" id="github-sync-local"><span>仅本地服务模式：保存后覆盖本地账号配置、两个工作流，并更新 .env，不自动提交本地 Git</span></label>
+                        </div>
+                        <div class="github-vault">
+                            <label><input type="checkbox" id="github-remember-token"> 用自设密码加密记住 PAT</label>
+                            <p id="github-vault-status" role="status">PAT 未保存</p>
+                            <div class="cloud-fields">
+                                <div class="form-group">
+                                    <label for="github-vault-password">解锁密码</label>
+                                    <input type="password" id="github-vault-password" placeholder="设置时至少 10 个字符；刷新后用此密码解锁" autocomplete="off">
+                                </div>
+                                <div class="form-group">
+                                    <label for="github-vault-confirm">确认密码（首次保存或更改密码时）</label>
+                                    <input type="password" id="github-vault-confirm" placeholder="仅解锁时无需填写" autocomplete="off">
+                                </div>
+                            </div>
+                            <small>浏览器只保存密文，不保存密码；忘记密码需删除密文并重新填写 PAT。解锁后的可信页面仍能使用 PAT，请仅在自己的设备和可信页面操作。GitHub 设置不包含账号草稿或 WebDAV 密码。</small>
+                            <div class="btn-group">
+                                <button type="button" class="btn btn-primary btn-sm" onclick="unlockGithubToken()">🔓 解锁 PAT</button>
+                                <button type="button" class="btn btn-secondary btn-sm" onclick="lockGithubToken()">🔒 立即锁定</button>
+                                <button type="button" class="btn btn-secondary btn-sm" onclick="forgetGithubToken()">删除已保存的 PAT</button>
+                            </div>
+                        </div>
+                        <small>首次保存或切换仓库 / 分支后自动读取账号；账号修改需在「GitHub 同步」中确认保存。提交明文 .env 和覆盖本地文件仍需每次确认。</small>
+                        <div class="btn-group">
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="clearGithubSettings()">清除 GitHub 设置</button>
+                        </div>
+                    </div>
+                    <div class="github-settings-footer">
+                        <div id="github-settings-status" class="cloud-status" role="status" aria-live="polite"></div>
+                        <div class="account-editor-actions">
+                            <button type="button" class="btn btn-secondary" onclick="closeGithubSettings()">取消</button>
+                            <button type="submit" class="btn btn-success">💾 保存设置</button>
+                        </div>
+                    </div>
+                </form>
+            </dialog>
+
             <div id="github-section" class="cloud-section github-section" style="display: none;">
                 <h3>🐙 GitHub 同步</h3>
                 <p>可直接通过 GitHub Pages 访问，随时修改账号，无需运行本地服务。浏览器直连 GitHub API，一次同步账号和两个工作流，可选创建 / 更新 Secrets 及私有仓库的 .env，不经过第三方代理。</p>
-                <p id="github-settings-summary" role="status">尚未保存 GitHub 设置</p>
-                <details id="github-settings-panel" open>
-                <summary>⚙️ GitHub 设置 · 保存在当前浏览器</summary>
-                <div class="cloud-fields">
-                    <div class="form-group">
-                        <label for="github-repository">签到配置仓库 <span class="required">*</span></label>
-                        <input type="text" id="github-repository" placeholder="owner/Newapi-checkin" autocomplete="off">
-                        <small>填写存放签到程序和账号的 owner/repo；不要填公开界面仓库 cls4756/Newapi-checkin-pages。建议先加载完整账号列表。</small>
-                    </div>
-                    <div class="form-group">
-                        <label for="github-branch">目标分支</label>
-                        <input type="text" id="github-branch" placeholder="留空使用仓库默认分支" autocomplete="off">
-                        <small>直接提交到该分支；分支保护或仓库规则可能阻止保存</small>
-                    </div>
-                    <div class="form-group">
-                        <label for="github-token">GitHub Personal Access Token <span class="required">*</span></label>
-                        <input type="password" id="github-token" placeholder="首次保存或更换 PAT 时填写；解锁后无需重复填写" autocomplete="off" spellcheck="false">
-                        <small>Fine-grained PAT：选定仓库，Contents 和 Workflows 读写；同步 Secrets 还需 Secrets 读写。未选择加密保存时仅供当前页面使用。</small>
-                    </div>
-                    <div class="form-group">
-                        <label for="github-save-mode">账号保存方式</label>
-                        <select id="github-save-mode">
-                            <option value="merge">合并新增 / 更新（推荐，保留远端其他账号）</option>
-                            <option value="replace">替换账号列表（用于删除账号，保留其他工作流设置）</option>
-                        </select>
-                        <small>同一 URL + 用户 ID 视为同一账号；不同账号的令牌变量名必须独立</small>
-                    </div>
-                </div>
-                <div class="github-options">
-                    <label><input type="checkbox" id="github-sync-secrets" checked><span>自动创建 / 更新 Actions Secrets：使用 GitHub 公钥在当前设备加密后上传；留空保留已有 Secret</span></label>
-                    <label><input type="checkbox" id="github-include-env"><span>同时提交明文 .env（仅私有仓库）。我确认：凭证进入 Git 历史，私有仓库不能保证绝不泄露；首次导入的文件会包含其中的全部变量</span></label>
-                    <label id="github-local-option"><input type="checkbox" id="github-sync-local"><span>仅本地服务模式：保存后覆盖本地账号配置、两个工作流，并更新 .env，不自动提交本地 Git</span></label>
-                </div>
-                <div class="github-vault">
-                    <label><input type="checkbox" id="github-remember-token"> 用自设密码加密记住 PAT</label>
-                    <p id="github-vault-status" role="status">PAT 未保存</p>
-                    <div class="cloud-fields">
-                        <div class="form-group">
-                            <label for="github-vault-password">解锁密码</label>
-                            <input type="password" id="github-vault-password" placeholder="设置时至少 10 个字符；刷新后用此密码解锁" autocomplete="off">
-                        </div>
-                        <div class="form-group">
-                            <label for="github-vault-confirm">确认密码（首次保存或更改密码时）</label>
-                            <input type="password" id="github-vault-confirm" placeholder="仅解锁时无需填写" autocomplete="off">
-                        </div>
-                    </div>
-                    <small>浏览器只保存密文，不保存密码；忘记密码需删除密文并重新填写 PAT。解锁后的可信页面仍能使用 PAT，请仅在自己的设备和可信页面操作。GitHub 设置不包含账号草稿或 WebDAV 密码。</small>
-                    <div class="btn-group">
-                        <button type="button" class="btn btn-primary btn-sm" onclick="unlockGithubToken()">🔓 解锁 PAT</button>
-                        <button type="button" class="btn btn-secondary btn-sm" onclick="lockGithubToken()">🔒 立即锁定</button>
-                        <button type="button" class="btn btn-secondary btn-sm" onclick="forgetGithubToken()">删除已保存的 PAT</button>
-                    </div>
-                </div>
-                <div class="btn-group">
-                    <button type="button" class="btn btn-success btn-sm" onclick="saveGithubSettings()">💾 仅保存浏览器设置</button>
-                    <button type="button" class="btn btn-secondary btn-sm" onclick="clearGithubSettings()">清除 GitHub 设置</button>
-                </div>
-                <small>仓库、分支和上述选项会恢复；提交明文 .env 和覆盖本地文件仍需每次确认。「仅保存浏览器设置」不会修改 GitHub。</small>
-                </details>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="openGithubSettings()">⚙️ 修改同步设置 / 解锁 PAT</button>
                 <div class="form-group" id="github-env-import-row">
                     <label for="github-env-import">首次托管 .env：选择文件（可选）</label>
                     <input type="file" id="github-env-import" autocomplete="off">
@@ -4552,7 +4572,6 @@
     <script>
         window.onload = function() {
             AccountTable.init();
-            initAccountImport();
         };
 
         function addSite() {
