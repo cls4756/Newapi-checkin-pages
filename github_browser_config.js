@@ -384,7 +384,8 @@ globalThis.GitHubBrowserConfig = (() => {
                 if (typeof template !== 'string' || new TextEncoder().encode(template).length > 1024 * 1024) throw new Error('.env 模板必须是小于 1 MB 的文本');
                 const updatedEnv = updateEnvContent(template, names, providedValues);
                 const missing = names.filter(name => !envValues(updatedEnv)[name]);
-                if (missing.length) throw new Error('.env 缺少令牌，请在表单中填写，或首次选择 .env 文件：' + missing.join('、'));
+                if (missing.length) throw new Error('.env 缺少令牌：' + missing.join('、')
+                    + '。请在表单中填写，或首次选择 .env 文件；首次创建需要保存后全部账号的令牌，已有 Actions Secrets 的值无法读回。也可取消明文 .env 托管。本次尚未写入任何文件或 Secrets。');
                 files.set('.env', updatedEnv);
             }
             let encrypted = new Map();
@@ -402,20 +403,23 @@ globalThis.GitHubBrowserConfig = (() => {
             if (flags.include_env && (await client.request('GET')).private !== true) throw new Error('仓库已变为公开，已取消 .env 上传；请检查仓库可见性后重试');
             const commit = await snapshot.commit(files);
             const savedSecrets = [];
+            const failedSecrets = [];
             const warnings = [];
             for (const [name, value] of encrypted) {
                 try {
                     await client.request('PUT', 'actions/secrets/' + name, value);
                     savedSecrets.push(name);
                 } catch (error) {
-                    warnings.push(`文件已保存，但 Secret ${name} 同步失败：${error.message}。请重新填写令牌并重试。`);
+                    failedSecrets.push(name);
+                    warnings.push(`Secret ${name} 同步失败或结果无法确认：${error.message}。已写入的文件和 Secrets 不会自动回滚，请核对后重试。`);
                 }
             }
             if (!flags.sync_secrets) warnings.push('未自动同步 Secrets；请确保所有账号变量已有同名 GitHub Actions Secret。');
             return {repository: client.repository, branch: snapshot.branch, private: snapshot.privateRepository,
                 accounts, account_count: accounts.length, commit_sha: commit.sha,
                 commit_url: `https://github.com/${client.repository}/commit/${commit.sha}`,
-                changed_files: commit.files, saved_secrets: savedSecrets, local_updated: false, warnings};
+                changed_files: commit.files, saved_secrets: savedSecrets, failed_secrets: failedSecrets,
+                complete: failedSecrets.length === 0, local_updated: false, warnings};
         } finally {
             client.token = '';
         }

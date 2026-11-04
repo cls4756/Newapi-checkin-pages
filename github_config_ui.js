@@ -177,24 +177,30 @@ async function saveToGithub() {
         : '\n⚠️ 明文 .env 将进入私有仓库的 Git 历史；首次以你选择的 .env 文件或本次填写的账号令牌创建，不会发布到 Pages。';
     if (payload.sync_local) confirmation += '\n⚠️ 同时覆盖本地公开配置和工作流，并更新本地 .env。';
     if (payload.sync_secrets) confirmation += `\n加密上传 ${Object.keys(payload.secrets).length} 个填写的凭证；留空保留已有 Secrets。`;
+    if (payload.sync_secrets) confirmation += '\n⚠️ 文件和 Secrets 不能作为一个原子事务；部分失败会标为未全部完成，已写入部分不会自动回滚。';
     if (!confirm(confirmation + '\n\n确认保存？')) return;
     setGithubBusy(true);
     document.getElementById('github-commit-link').hidden = true;
     showGithubStatus('info', '正在检查配置、提交 GitHub 文件并同步 Secrets，请勿关闭页面…');
     try {
         const result = await githubRequest(payload);
-        loadFlatData(result.accounts);
+        const complete = result.complete !== false && !result.failed_secrets?.length
+            && (result.complete === true || result.warnings.length === 0);
+        if (complete) loadFlatData(result.accounts);
         document.getElementById('github-branch').value = result.branch;
         rememberGithubTarget(payload.repository, result.branch);
         const summary = [
-            `已保存 ${result.account_count} 个账号，分支：${result.branch}。`,
+            complete ? `已保存 ${result.account_count} 个账号，分支：${result.branch}。`
+                : `保存未全部完成，分支：${result.branch}。已写入部分不会自动回滚；当前账号草稿和填写的令牌保留在页面内，可核对后重新输入 PAT 重试。`,
             result.changed_files.length ? '已提交文件：' + result.changed_files.join('、') : '远端文件没有变化，无需新提交。',
-            '已更新 Secrets：' + (result.saved_secrets.join('、') || '无（留空的已有 Secret 保持不变）')
+            '已更新 Secrets：' + (result.saved_secrets.join('、')
+                || (complete ? '无（留空的已有 Secret 保持不变）' : '无已确认成功的更新'))
         ];
+        if (result.failed_secrets?.length) summary.push('未完成或需核对的 Secrets：' + result.failed_secrets.join('、'));
         if (result.local_updated) summary.push('本地项目和 .env 已更新；没有自动执行 git add / commit / pull。');
         else summary.push('设备本地文件未更新；如需本地调试，请从 GitHub 拉取配置。');
         summary.push(...result.warnings);
-        showGithubStatus(result.warnings.length ? 'info' : 'success', summary.join('\n'));
+        showGithubStatus(!complete ? 'error' : result.warnings.length ? 'info' : 'success', summary.join('\n'));
         const link = document.getElementById('github-commit-link');
         link.href = result.commit_url;
         link.hidden = result.changed_files.length === 0;
