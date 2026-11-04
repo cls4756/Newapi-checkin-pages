@@ -37,5 +37,5 @@ const storage = {getItem: key => values.get(key), setItem: (key, value) => value
     assert.equal(settings.read(storage).repository, old.repository);
     settings.clear(storage);
     assert.equal(settings.read(storage).repository, '');
-    console.log('PASS encrypted PAT: reload, wrong password, tampering, random salt/IV, metadata-only migration, storage failure, forgetting');
+    console.log('PASS encrypted PAT: 5-character minimum, reload, wrong password, tampering, random salt/IV, metadata-only migration, storage failure, forgetting');
 })().catch(error => { console.error(error); process.exitCode = 1; });
