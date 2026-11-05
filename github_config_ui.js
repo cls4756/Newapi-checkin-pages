@@ -10,7 +10,8 @@ let githubLoadAfterDialog = false;
 let githubAccountsLoaded = false;
 let githubAccountsDirty = false;
 const githubSettingFields = ['github-repository', 'github-branch', 'github-save-mode',
-    'github-sync-secrets', 'github-include-env', 'github-sync-local', 'github-remember-token'];
+    'github-sync-secrets', 'github-include-env', 'github-sync-local', 'github-remember-token',
+    'github-pushplus-mode', 'github-pushplus-token', 'github-pushplus-only-failure', 'github-tokenbom-pat'];
 
 function toggleGithubSync() {
     const section = document.getElementById('github-section');
@@ -88,12 +89,14 @@ function finishGithubSettings() {
         document.getElementById(id)[property] = value;
     });
     githubSettingsSnapshot = null;
+    updatePushplusControls();
+    try { updateGithubSettingsSummary(); } catch {}
     for (const id of ['github-token', 'github-vault-password', 'github-vault-confirm']) {
         document.getElementById(id).value = '';
     }
     const reload = githubLoadAfterDialog && ['saved', 'unlocked'].includes(dialog.returnValue);
     githubLoadAfterDialog = false;
-    if (reload) loadFromGithub(githubLoadPending || {automatic: true});
+    if (reload) loadFromGithub({...(githubLoadPending || {automatic: true}), preserveServiceDraft: dialog.returnValue === 'saved'});
     else {
         if (dialog.returnValue === 'cancel' || !dialog.returnValue) githubLoadPending = null;
         initAccountImport();
@@ -117,12 +120,18 @@ function githubPreferences() {
         syncLocal: usesLocalGithubGateway() && document.getElementById('github-sync-local').checked};
 }
 
+function hasServiceDraft() {
+    return document.getElementById('github-pushplus-mode').value !== 'preserve'
+        || Boolean(document.getElementById('github-pushplus-token').value)
+        || Boolean(document.getElementById('github-tokenbom-pat').value);
+}
+
 function updateGithubSettingsSummary() {
     const saved = GitHubSettings.read();
     const tokenState = unlockedGithubToken ? 'PAT 已解锁，仅在本页内存中使用'
         : saved.vault ? 'PAT 已加密保存，使用前请解锁' : 'PAT 未保存';
     document.getElementById('github-settings-summary').textContent =
-        `${saved.repository || '尚未保存仓库设置'} · ${saved.branch || '默认分支'} · ${tokenState}`;
+        `${saved.repository || '尚未保存仓库设置'} · ${saved.branch || '默认分支'} · ${tokenState}` + (hasServiceDraft() ? ' · 推送 / 续期有未提交修改' : '');
     document.getElementById('github-vault-status').textContent = tokenState;
 }
 
@@ -154,7 +163,9 @@ async function saveGithubSettings() {
         if (token && revision === githubLockRevision) unlockedGithubToken = GitHubSettings.validateToken(token);
         document.getElementById('github-token').value = '';
         updateGithubSettingsSummary();
-        showGithubStatus('success', '设置已保存到当前浏览器，刷新后恢复。没有向 GitHub 提交文件或上传凭证。');
+        showGithubStatus('success', hasServiceDraft()
+            ? 'GitHub 连接设置已保存在当前浏览器；推送与续期修改暂存本页，请点击「确认并保存到 GitHub」后生效。'
+            : '设置已保存到当前浏览器，刷新后恢复。没有向 GitHub 提交文件或上传凭证。');
         savedSuccessfully = true;
         githubLoadAfterDialog = reload;
     } catch (error) {
@@ -344,6 +355,11 @@ function collectGithubSavePayload() {
         allowEmpty: document.getElementById('github-save-mode').value === 'replace'});
     const includeEnv = document.getElementById('github-include-env').checked;
     const syncSecrets = document.getElementById('github-sync-secrets').checked;
+    const automationPat = document.getElementById('github-tokenbom-pat')?.value?.trim() || '';
+    if (automationPat) {
+        if (!syncSecrets) throw new Error('TokenBom 续期 PAT 只能加密同步到 Actions Secrets');
+        secrets.TOKENBOM_SECRETS_PAT = automationPat;
+    }
     const syncLocal = document.getElementById('github-sync-local').checked;
     if (syncLocal && !usesLocalGithubGateway()) {
         throw new Error('GitHub Pages 无法回写设备本地文件，请取消本地回写，保存后从仓库拉取即可');
@@ -382,7 +398,7 @@ function loadGithubAccountsOnOpen() {
     initAccountImport();
 }
 
-async function loadFromGithub({automatic = false} = {}) {
+async function loadFromGithub({automatic = false, preserveServiceDraft = false} = {}) {
     if (githubBusy || githubSettingsBusy) return;
     let target;
     try {
@@ -394,10 +410,8 @@ async function loadFromGithub({automatic = false} = {}) {
         return;
     }
     githubLoadPending = null;
-    const hasDraft = githubAccountsDirty
-        || document.getElementById('github-pushplus-mode').value !== 'preserve'
-        || document.getElementById('github-pushplus-token').value;
-    if ((!automatic || hasDraft) && !confirm('从 GitHub 加载将覆盖当前账号表单，并清空本页尚未保存的 PushPlus 配置。只读取公开账号配置，不读取 .env 或 Secrets 的值。是否继续？')) {
+    const hasDraft = githubAccountsDirty || (!preserveServiceDraft && hasServiceDraft());
+    if ((!automatic || hasDraft) && !confirm('从 GitHub 加载将覆盖当前账号表单，并清空本页尚未保存的 PushPlus / TokenBom 续期配置。只读取公开账号配置，不读取 .env 或 Secrets 的值。是否继续？')) {
         showGithubStatus('info', '已取消从 GitHub 加载，当前账号表格和未保存的修改保持不变。');
         initAccountImport();
         return;
@@ -408,9 +422,13 @@ async function loadFromGithub({automatic = false} = {}) {
     try {
         const result = await githubRequest({...target, action: 'load'});
         loadFlatData(result.accounts);
+        AccountTable.markSynced();
         githubAccountsDirty = false;
         githubAccountsLoaded = true;
-        clearPushplusDraft();
+        if (!preserveServiceDraft) {
+            clearPushplusDraft();
+            document.getElementById('github-tokenbom-pat').value = '';
+        }
         document.getElementById('github-branch').value = result.branch;
         const storageWarning = rememberGithubTarget(target.repository, result.branch);
         showGithubStatus(storageWarning ? 'info' : 'success', `已加载 ${result.accounts.length} 个账号，分支：${result.branch}（${result.private ? '私有' : '公开'}仓库）。已有凭证不会读回，新增或更新令牌时再填写。` + (storageWarning ? '\n' + storageWarning : ''));
@@ -444,6 +462,7 @@ async function saveToGithub() {
         + (payload.notifications.pushplus.only_failure ? '\n仅在签到步骤失败时推送。' : '\n签到步骤成功或失败均推送。');
     if (payload.notifications?.pushplus.mode === 'disable') confirmation += '\n关闭由本页面添加的 PushPlus 工作流步骤，保留已有 PUSHPLUS_TOKEN Secret 和其他通知设置。';
     if (payload.sync_secrets) confirmation += '\n⚠️ 文件和 Secrets 不能作为一个原子事务；部分失败会标为未全部完成，已写入部分不会自动回滚。';
+    if (payload.secrets.TOKENBOM_SECRETS_PAT) confirmation += '\n将续期 PAT 加密保存为 TOKENBOM_SECRETS_PAT，供后续 TokenBom 任务更新 refreshToken。';
     if (!confirm(confirmation + '\n\n确认保存？')) return;
     setGithubBusy(true);
     document.getElementById('github-commit-link').hidden = true;
@@ -454,9 +473,12 @@ async function saveToGithub() {
             && (result.complete === true || result.warnings.length === 0);
         if (complete) {
             loadFlatData(result.accounts);
+            AccountTable.markSynced();
             githubAccountsDirty = false;
             githubAccountsLoaded = true;
             clearPushplusDraft();
+            const automationInput = document.getElementById('github-tokenbom-pat');
+            if (automationInput) automationInput.value = '';
         }
         document.getElementById('github-branch').value = result.branch;
         const storageWarning = rememberGithubTarget(payload.repository, result.branch);

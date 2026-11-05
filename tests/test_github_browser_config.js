@@ -144,6 +144,60 @@ async function runTest(name, callback) {
 
 async function main() {
 
+    await runTest('TokenBom saves refreshToken and renewal PAT only as Secrets with stable merge and pause support', async () => {
+        const {api, context, service, payload} = await createService();
+        const bom = {type: 'tokenbom', url: 'https://tokenbom.example', account_id: 'stable', name: 'Synthetic', refresh_token_env: 'BOM_REFRESH'};
+        await assert.rejects(() => service.handle({...payload, accounts: [bom], secrets: {BOM_REFRESH: 'synthetic-refresh'}}), /TOKENBOM_SECRETS_PAT/);
+        assert.equal(mutations(api).length, 0);
+        const credentials = {BOM_REFRESH: 'synthetic-refresh', TOKENBOM_SECRETS_PAT: 'synthetic-renewal-pat'};
+        const saved = await service.handle({...payload, accounts: [bom], secrets: credentials});
+        assert.equal(saved.accounts.length, 2);
+        for (const call of api.calls.filter(call => call.method === 'PUT')) {
+            const value = context.sodium.crypto_box_seal_open(new Uint8Array(Buffer.from(call.payload.encrypted_value, 'base64')),
+                api.pair.publicKey, api.pair.privateKey, 'text');
+            assert.equal(value, credentials[call.endpoint.split('/').at(-1)]);
+        }
+        for (const path of workflowFiles) {
+            assert.ok(api.files.get(path).includes('BOM_REFRESH: ' + String.fromCharCode(36) + '{{ secrets.BOM_REFRESH }}'));
+            assert.ok(api.files.get(path).includes('TOKENBOM_SECRETS_PAT: ' + String.fromCharCode(36) + '{{ secrets.TOKENBOM_SECRETS_PAT }}'));
+            assert.ok(api.files.get(path).includes("cron: '10 0 * * *'"));
+        }
+        const publicText = JSON.stringify(saved) + [...api.files.values()].join('');
+        for (const value of Object.values(credentials)) assert.ok(!publicText.includes(value));
+        assert.ok(!api.readPaths.includes('.env'));
+        const paused = await service.handle({...payload, accounts: [{...bom, enabled: false}], secrets: {}});
+        assert.equal(paused.accounts[1].enabled, false);
+        const resumed = await service.handle({...payload, accounts: [{...bom, name: 'Updated', enabled: true}], secrets: {}});
+        assert.equal(resumed.accounts.length, 2);
+        assert.equal(resumed.accounts[1].name, 'Updated');
+    });
+    await runTest('TokenBom rejects public repositories, mixed credentials and duplicate names before writes', async () => {
+        const bom = {type: 'tokenbom', url: 'https://tokenbom.example', account_id: 'stable', refresh_token_env: 'BOM_REFRESH'};
+        for (const changes of [{private: false}, {changeVisibility: true}]) {
+            const {api, service, payload} = await createService();
+            Object.assign(api, changes);
+            await assert.rejects(() => service.handle({...payload, accounts: [bom], secrets: {
+                BOM_REFRESH: 'synthetic-refresh', TOKENBOM_SECRETS_PAT: 'synthetic-renewal-pat'}}));
+            assert.equal(mutations(api).length, 0);
+        }
+        const {service} = await createService();
+        for (const changes of [{refresh_token: 'synthetic-refresh'}, {refreshToken: 'synthetic-refresh'},
+            {session_token_env: 'OTHER'}, {refresh_token_env: 'TOKENBOM_SECRETS_PAT'}, {url: 'http://tokenbom.example'}]) {
+            assert.throws(() => service.validateAccounts([{...bom, ...changes}]));
+        }
+        assert.throws(() => service.validateAccounts([bom, {...bom, account_id: 'second'}]), /冲突/);
+    });
+    await runTest('TokenBom renewal PAT is excluded from explicitly hosted synthetic env content', async () => {
+        const {api, service, payload} = await createService();
+        await service.handle({...payload, accounts: [{type: 'tokenbom', url: 'https://tokenbom.example',
+            account_id: 'stable', refresh_token_env: 'BOM_REFRESH'}],
+            secrets: {BOM_REFRESH: 'synthetic-refresh', TOKENBOM_SECRETS_PAT: 'synthetic-renewal-pat'},
+            include_env: true, confirm_plaintext_env: true}, {readEnvTemplate: async () => 'OLD_TOKEN=synthetic-old\n'});
+        assert.ok(!api.files.get('.env').includes('TOKENBOM_SECRETS_PAT'));
+        assert.ok(!api.files.get('.env').includes('synthetic-renewal-pat'));
+    });
+
+
     await runTest('account pause and resume preserve identity, workflow references and Secrets', async () => {
         for (const original of [account(), {type: 'vyceai', url: 'https://synthetic.example', account_id: 'synthetic-stable', name: 'VyceAI', session_token_env: 'NEW_TOKEN'}]) {
             const {api, service, payload} = await createService();

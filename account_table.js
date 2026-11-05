@@ -9,6 +9,35 @@ globalThis.AccountTable = (() => {
     let initialized = false;
     let allocatedNames = new Set();
     let editorRevision = 0;
+    let editorDefaultTokenName = '';
+    let remoteRows = new Map();
+    let originalKeys = new Map();
+
+    function publicSnapshot(account) {
+        return JSON.stringify([account.type, account.url, account.userId, account.name,
+            account.accessTokenEnv, account.cfClearanceEnv, account.enabled,
+            account.type === 'newapi' ? '' : account.accountId]);
+    }
+
+    function syncState(account) {
+        const previous = remoteRows.get(originalKeys.get(account.id) || identity(account));
+        if (previous === undefined) return 'new';
+        const credentialChanged = ['accessToken', 'cfClearance', 'session', 'loginUser', 'loginPass'].some(field => account[field]);
+        return credentialChanged || previous !== publicSnapshot(account) ? 'modified' : 'synced';
+    }
+
+    function markSynced() {
+        remoteRows = new Map(rows.map(account => [identity(account), publicSnapshot(account)]));
+        originalKeys = new Map(rows.map(account => [account.id, identity(account)]));
+        render();
+    }
+
+    function orderedRows() {
+        const query = element('account-search').value.trim().toLocaleLowerCase();
+        return rows.filter(row => [row.url, row.name, row.userId, row.accessTokenEnv, row.type]
+            .some(value => value.toLocaleLowerCase().includes(query)))
+            .sort((left, right) => Number(right.enabled) - Number(left.enabled));
+    }
 
     function element(identifier) {
         return document.getElementById(identifier);
@@ -47,14 +76,14 @@ globalThis.AccountTable = (() => {
             url = account.url;
         }
         return JSON.stringify([account.type || 'newapi', url,
-            account.type === 'vyceai' ? account.accountId : account.userId]);
+            account.type !== 'newapi' ? account.accountId : account.userId]);
     }
 
     function nextTokenName(accounts, usedNames = allocatedNames, type = 'newapi') {
         const used = new Set([...usedNames,
             ...accounts.flatMap(account => [account.accessTokenEnv, account.cfClearanceEnv])]);
         let tokenNumber = 1;
-        const prefix = type === 'vyceai' ? 'VYCEAI_SESSION_TOKEN_ACCOUNT' : 'NEWAPI_TOKEN_ACCOUNT';
+        const prefix = type === 'tokenbom' ? 'TOKENBOM_REFRESH_TOKEN_ACCOUNT' : type === 'vyceai' ? 'VYCEAI_SESSION_TOKEN_ACCOUNT' : 'NEWAPI_TOKEN_ACCOUNT';
         while (used.has(prefix + tokenNumber)) tokenNumber += 1;
         return prefix + tokenNumber;
     }
@@ -68,10 +97,11 @@ globalThis.AccountTable = (() => {
     function validateFields(values) {
         const account = normalize(values);
         account.url = normalizedUrl(account.url);
-        if (!['newapi', 'vyceai'].includes(account.type)) throw new Error('不支持的站点类型');
+        if (!['newapi', 'vyceai', 'tokenbom'].includes(account.type)) throw new Error('不支持的站点类型');
         if (typeof account.enabled !== 'boolean') throw new Error('enabled 必须是布尔值 true 或 false');
-        if (account.type === 'vyceai') {
-            if (!/^[A-Za-z0-9_-]{1,80}$/.test(account.accountId)) throw new Error('VyceAI 需要有效的稳定账号标识 account_id');
+        if (account.type !== 'newapi') {
+            if (account.type === 'tokenbom' && !account.url.startsWith('https://')) throw new Error('TokenBom 必须使用 HTTPS 地址');
+            if (!/^[A-Za-z0-9_-]{1,80}$/.test(account.accountId)) throw new Error('该站点需要有效的稳定账号标识 account_id');
             for (const field of ['userId', 'cfClearanceEnv', 'cfClearance', 'session', 'loginUser', 'loginPass']) account[field] = '';
         } else if (!/^[1-9][0-9]*$/.test(account.userId)) throw new Error('用户 ID 必须是站点个人信息中的正整数');
         if (account.name.length > 200) throw new Error('备注名称不能超过 200 个字符');
@@ -121,8 +151,7 @@ globalThis.AccountTable = (() => {
             rows.push({...account, id: identifier});
         }
         element('account-search').value = '';
-        page = previous ? Math.floor(rows.findIndex(row => row.id === identifier) / pageSize()) + 1
-            : Math.ceil(rows.length / pageSize());
+        page = Math.floor(orderedRows().findIndex(row => row.id === identifier) / pageSize()) + 1;
         render();
         status(replacementNeeded
             ? '草稿已更新。删除账号、修改站点 / 用户 ID 或清除 CF 变量后，保存到 GitHub 时需选择「替换账号列表」。'
@@ -160,8 +189,8 @@ globalThis.AccountTable = (() => {
                     url: values.url ?? entry.url,
                     userId: values.userId ?? values.user_id,
                     name: values.name,
-                    accessTokenEnv: values.accessTokenEnv ?? values.access_token_env ?? values.session_token_env,
-                    accessToken: values.accessToken ?? values.access_token ?? values.session_token,
+                    accessTokenEnv: values.accessTokenEnv ?? values.access_token_env ?? values.session_token_env ?? values.refresh_token_env,
+                    accessToken: values.accessToken ?? values.access_token ?? values.session_token ?? values.refresh_token ?? values.refreshToken,
                     cfClearanceEnv: values.cfClearanceEnv ?? values.cf_clearance_env ?? entry.cfClearanceEnv ?? entry.cf_clearance_env,
                     cfClearance: values.cfClearance ?? values.cf_clearance ?? entry.cfClearance ?? entry.cf_clearance,
                     session: values.session,
@@ -234,8 +263,8 @@ globalThis.AccountTable = (() => {
                     cfClearanceEnv: site.cfClearanceEnv || site.cf_clearance_env,
                     userId: account.userId || account.user_id,
                     name: account.name,
-                    accessTokenEnv: account.accessTokenEnv || account.access_token_env || account.session_token_env,
-                    accessToken: account.accessToken || account.access_token || account.session_token,
+                    accessTokenEnv: account.accessTokenEnv || account.access_token_env || account.session_token_env || account.refresh_token_env,
+                    accessToken: account.accessToken || account.access_token || account.session_token || account.refresh_token || account.refreshToken,
                     session: account.session,
                     loginUser: account.loginUser || account.login_username,
                     loginPass: account.loginPass || account.login_password
@@ -289,9 +318,7 @@ globalThis.AccountTable = (() => {
     }
 
     function render() {
-        const query = element('account-search').value.trim().toLocaleLowerCase();
-        const filtered = rows.filter(row => [row.url, row.name, row.userId, row.accessTokenEnv]
-            .some(value => value.toLocaleLowerCase().includes(query)));
+        const filtered = orderedRows();
         const size = pageSize();
         const pages = Math.max(1, Math.ceil(filtered.length / size));
         page = Math.min(Math.max(1, page), pages);
@@ -319,9 +346,18 @@ globalThis.AccountTable = (() => {
                 urlCell.appendChild(link);
             }
             appendCell(row, account.name || '未备注');
-            appendCell(row, account.type === 'vyceai' ? 'VyceAI' : account.userId);
+            appendCell(row, account.type === 'tokenbom' ? 'TokenBom' : account.type === 'vyceai' ? 'VyceAI' : account.userId);
             appendCell(row, account.accessTokenEnv, 'account-variable-cell');
             appendCell(row, account.accessToken ? '已填写，待同步' : '未填写新令牌');
+            const state = syncState(account);
+            const syncCell = appendCell(row, '', 'account-sync-cell');
+            const badge = document.createElement('span');
+            badge.className = 'account-sync-badge is-' + state;
+            badge.textContent = {synced: '已同步', new: '新增未提交', modified: '修改未提交'}[state];
+            badge.title = state === 'synced' ? '与最近一次从 GitHub 加载或完整保存成功的配置一致'
+                : '仅存在于当前草稿，保存到 GitHub 后才影响定时任务';
+            syncCell.appendChild(badge);
+            row.dataset.syncState = state;
             const enabledCell = appendCell(row, '', 'account-enabled-cell');
             const toggle = document.createElement('button');
             toggle.type = 'button';
@@ -332,6 +368,7 @@ globalThis.AccountTable = (() => {
             toggle.setAttribute('aria-label', '启用签到：' + (account.name || account.userId || 'VyceAI'));
             toggle.addEventListener('click', () => {
                 account.enabled = !account.enabled;
+                page = Math.floor(orderedRows().findIndex(row => row.id === account.id) / pageSize()) + 1;
                 render();
                 status('启停状态已更新到草稿；点击「保存到 GitHub」后定时签到生效，已有 Secret 会保留。');
                 document.dispatchEvent(new CustomEvent('account-draft-changed'));
@@ -358,7 +395,7 @@ globalThis.AccountTable = (() => {
             const row = document.createElement('tr');
             const cell = appendCell(row, rows.length ? '没有匹配的账号，试试其他关键词。'
                 : '暂无账号，点击「添加账号」或先「从 GitHub 加载」。', 'account-empty');
-            cell.colSpan = 8;
+            cell.colSpan = 9;
             body.appendChild(row);
         }
         element('account-count').textContent = `${rows.length} 个账号 · ${rows.filter(row => row.enabled).length} 启用 / ${rows.filter(row => !row.enabled).length} 停用 · ${new Set(rows.map(row => row.url)).size} 个站点`;
@@ -368,13 +405,14 @@ globalThis.AccountTable = (() => {
     }
 
     function openEditor(identifier = null) {
-        const row = identifier === null ? normalize({accountId: 'vyceai-' + crypto.randomUUID()}) : rows.find(account => account.id === identifier);
+        const row = identifier === null ? normalize({accountId: 'account-' + crypto.randomUUID()}) : rows.find(account => account.id === identifier);
         if (!row) {
             status('该账号已不存在，请重新加载列表', true);
             return;
         }
         editingId = identifier;
         editorRevision += 1;
+        editorDefaultTokenName = '';
         element('account-editor-form').reset();
         fieldNames.forEach(field => { element('account-field-' + field).value = row[field]; });
         element('account-field-enabled').checked = row.enabled;
@@ -410,7 +448,7 @@ globalThis.AccountTable = (() => {
         fieldNames.forEach(field => { element('account-field-' + field).value = account[field] || existing?.[field] || ''; });
         element('account-field-enabled').checked = account.enabled;
         syncEditorType();
-        element('account-editor-advanced').open = account.type !== 'vyceai' && fieldNames.slice(5, 10).some(field => account[field]);
+        element('account-editor-advanced').open = account.type === 'newapi' && fieldNames.slice(5, 10).some(field => account[field]);
         element('account-editor-import-status').textContent = `已从${sourceName}填入一个账号；仅当前弹窗，检查后点击「保存到表格」。`;
         element('account-field-url').focus();
         return true;
@@ -501,20 +539,30 @@ globalThis.AccountTable = (() => {
     }
 
     function syncEditorType() {
-        const vyceai = element('account-field-type').value === 'vyceai';
-        element('account-field-userId').required = !vyceai;
-        element('account-field-userId').closest('.form-group').hidden = vyceai;
-        element('account-editor-advanced').hidden = vyceai;
-        element('account-token-label').textContent = vyceai ? 'VyceAI SessionToken' : '系统访问令牌';
-        element('account-token-help').textContent = vyceai
+        const type = element('account-field-type').value;
+        const vyceai = type === 'vyceai';
+        const tokenbom = type === 'tokenbom';
+        const special = vyceai || tokenbom;
+        element('account-field-userId').required = !special;
+        element('account-field-userId').closest('.form-group').hidden = special;
+        element('account-editor-advanced').hidden = special;
+        element('account-token-label').textContent = tokenbom ? 'TokenBom refreshToken' : vyceai ? 'VyceAI SessionToken' : '系统访问令牌';
+        element('account-token-help').textContent = tokenbom
+            ? '登录 TokenBom 后复制 refreshToken。轮换后自动保存到原 Secret；首次请在设置中配置续期 PAT。' : vyceai
             ? '登录 VyceAI 后，在浏览器 Cookie 中复制 session 的值。每日北京时间 08:00 重置奖励。'
             : '登录站点 → 个人设置 → 系统访问令牌。留空保留已有 Secret。';
-        element('account-field-accessTokenEnv').placeholder = vyceai ? 'VYCEAI_SESSION_TOKEN_ACCOUNT1' : 'NEWAPI_TOKEN_ACCOUNT1';
-        if (vyceai && !element('account-field-url').value.trim()) element('account-field-url').value = 'https://vyceai.com';
-        if (vyceai && !element('account-field-accountId').value) element('account-field-accountId').value = 'vyceai-' + crypto.randomUUID();
+        element('account-field-accessTokenEnv').placeholder = tokenbom ? 'TOKENBOM_REFRESH_TOKEN_ACCOUNT1' : vyceai ? 'VYCEAI_SESSION_TOKEN_ACCOUNT1' : 'NEWAPI_TOKEN_ACCOUNT1';
+        const tokenInput = element('account-field-accessTokenEnv');
+        if (!tokenInput.value.trim() || tokenInput.value === editorDefaultTokenName) {
+            const previous = rows.find(account => account.id === editingId);
+            tokenInput.value = previous?.accessTokenEnv || nextTokenName(rows, allocatedNames, type);
+            editorDefaultTokenName = previous ? '' : tokenInput.value;
+        }
+        if (special && !element('account-field-url').value.trim()) element('account-field-url').value = tokenbom ? 'https://tokenbom.com' : 'https://vyceai.com';
+        if (special && !element('account-field-accountId').value) element('account-field-accountId').value = type + '-' + crypto.randomUUID();
     }
 
-    return {init, openEditor, fillEditor, pasteIntoEditor, parseAccounts, importAccounts,
+    return {init, openEditor, fillEditor, pasteIntoEditor, parseAccounts, importAccounts, markSynced,
         saveAccount, removeAccount, loadGrouped, collectGrouped,
         count: () => rows.length, requiresReplacement: () => replacementNeeded,
         refresh: render, allocationHistory: () => [...allocatedNames],

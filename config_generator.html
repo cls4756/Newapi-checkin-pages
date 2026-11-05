@@ -4059,7 +4059,7 @@
                 </div>
                 <div class="account-table-scroll" tabindex="0" role="region" aria-label="账号列表，可横向滚动">
                     <table class="account-table">
-                        <thead><tr><th scope="col">序号</th><th scope="col">站点</th><th scope="col">备注</th><th scope="col">用户 / 类型</th><th scope="col">令牌变量名</th><th scope="col">新令牌</th><th scope="col">签到</th><th scope="col">操作</th></tr></thead>
+                        <thead><tr><th scope="col">序号</th><th scope="col">站点</th><th scope="col">备注</th><th scope="col">用户 / 类型</th><th scope="col">令牌变量名</th><th scope="col">新令牌</th><th scope="col">同步状态</th><th scope="col">签到</th><th scope="col">操作</th></tr></thead>
                         <tbody id="account-table-body"></tbody>
                     </table>
                 </div>
@@ -4103,7 +4103,7 @@
                     <div class="account-editor-grid">
                         <div class="form-group">
                             <label for="account-field-type">站点类型</label>
-                            <select id="account-field-type"><option value="newapi">NewAPI</option><option value="vyceai">VyceAI 每日奖励</option></select>
+                            <select id="account-field-type"><option value="newapi">NewAPI</option><option value="vyceai">VyceAI 每日奖励</option><option value="tokenbom">TokenBom 积分签到</option></select>
                             <input id="account-field-accountId" type="hidden">
                         </div>
                         <div class="form-group">
@@ -4186,8 +4186,8 @@
                 <form id="github-settings-form" novalidate autocomplete="off">
                     <div class="account-editor-heading github-settings-heading">
                         <div>
-                            <h2 id="github-settings-title">⚙️ GitHub 同步设置</h2>
-                            <p id="github-settings-description">设置保存在当前浏览器；重新打开页面，解锁后自动加载 GitHub 最新账号。</p>
+                            <h2 id="github-settings-title">⚙️ 签到设置</h2>
+                            <p id="github-settings-description">连接设置保存在当前浏览器；推送和续期修改需保存到 GitHub 后生效。</p>
                         </div>
                         <button type="button" class="btn btn-secondary btn-xs" onclick="closeGithubSettings()" aria-label="关闭 GitHub 设置">✕</button>
                     </div>
@@ -4242,30 +4242,6 @@
                                 <button type="button" class="btn btn-secondary btn-sm" onclick="forgetGithubToken()">删除已保存的 PAT</button>
                             </div>
                         </div>
-                        <small>首次保存或切换仓库 / 分支后自动读取账号；账号修改需在「GitHub 同步」中确认保存。提交明文 .env 和覆盖本地文件仍需每次确认。</small>
-                        <div class="btn-group">
-                            <button type="button" class="btn btn-secondary btn-sm" onclick="clearGithubSettings()">清除 GitHub 设置</button>
-                        </div>
-                    </div>
-                    <div class="github-settings-footer">
-                        <div id="github-settings-status" class="cloud-status" role="status" aria-live="polite"></div>
-                        <div class="account-editor-actions">
-                            <button type="button" class="btn btn-secondary" onclick="closeGithubSettings()">取消</button>
-                            <button type="submit" class="btn btn-success">💾 保存设置</button>
-                        </div>
-                    </div>
-                </form>
-            </dialog>
-
-            <div id="github-section" class="cloud-section github-section" style="display: none;">
-                <h3>🐙 GitHub 同步</h3>
-                <p>可直接通过 GitHub Pages 访问，随时修改账号，无需运行本地服务。浏览器直连 GitHub API，一次同步账号和两个工作流，可选创建 / 更新 Secrets 及私有仓库的 .env，不经过第三方代理。</p>
-                <button type="button" class="btn btn-secondary btn-sm" onclick="openGithubSettings()">⚙️ 修改同步设置 / 解锁 PAT</button>
-                <div class="form-group" id="github-env-import-row">
-                    <label for="github-env-import">首次托管 .env：选择文件（可选）</label>
-                    <input type="file" id="github-env-import" autocomplete="off">
-                    <small>只有勾选托管并确认保存后才读取。远端没有 .env 时使用此文件；不选择则仅用表单令牌创建。已有远端 .env 时保留其内容，此文件不生效。内容不显示、不保存到浏览器存储。</small>
-                </div>
                 <h4>📨 结果推送 · PushPlus</h4>
                 <p class="account-table-help">保存后由签到工作流直接调用 PushPlus，推送签到步骤成功 / 失败状态和 Actions 日志链接，不发送账号令牌或完整日志。这里配置的是任务级结果，不是逐账号余额或签到明细。</p>
                 <div class="form-group">
@@ -4289,6 +4265,36 @@
                     <p class="account-table-help">推送失败不改变签到步骤结果。PushPlus 接口接受消息不代表已送达，送达情况和额度请在服务端查看。若签到程序将部分账号失败作为正常退出，步骤仍显示成功；逐账号结果以日志为准。</p>
                 </div>
                 <p id="github-pushplus-local-note" class="account-table-help" hidden>本地 /github-config 后端尚不支持此新配置；请通过 HTTPS Pages 页面设置 PushPlus。</p>
+                <div class="form-group" id="github-tokenbom-pat-row">
+                    <label for="github-tokenbom-pat">TokenBom 自动续期 PAT（首次配置或更换时填写）</label>
+                    <input type="password" id="github-tokenbom-pat" autocomplete="off" spellcheck="false" placeholder="已有 TOKENBOM_SECRETS_PAT 时留空保留">
+                    <small>仅授权私有签到仓库、具有 Secrets 读写权限的 GitHub PAT。保存为 TOKENBOM_SECRETS_PAT，用于将轮换后的 refreshToken 加密写回原 Secret；不写入账号 JSON、.env 或浏览器存储。</small>
+                </div>
+                        <p class="account-table-help">推送和续期修改仅暂存本页；关闭设置后，点击「确认并保存到 GitHub」才会生效。</p>
+                        <small>首次保存或切换仓库 / 分支后自动读取账号；账号修改需在「GitHub 同步」中确认保存。提交明文 .env 和覆盖本地文件仍需每次确认。</small>
+                        <div class="btn-group">
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="clearGithubSettings()">清除 GitHub 设置</button>
+                        </div>
+                    </div>
+                    <div class="github-settings-footer">
+                        <div id="github-settings-status" class="cloud-status" role="status" aria-live="polite"></div>
+                        <div class="account-editor-actions">
+                            <button type="button" class="btn btn-secondary" onclick="closeGithubSettings()">取消</button>
+                            <button type="submit" class="btn btn-success">💾 保存设置</button>
+                        </div>
+                    </div>
+                </form>
+            </dialog>
+
+            <div id="github-section" class="cloud-section github-section" style="display: none;">
+                <h3>🐙 GitHub 同步</h3>
+                <p>可直接通过 GitHub Pages 访问，随时修改账号，无需运行本地服务。浏览器直连 GitHub API，一次同步账号和两个工作流，可选创建 / 更新 Secrets 及私有仓库的 .env，不经过第三方代理。</p>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="openGithubSettings()">⚙️ 同步、推送与续期设置</button>
+                <div class="form-group" id="github-env-import-row">
+                    <label for="github-env-import">首次托管 .env：选择文件（可选）</label>
+                    <input type="file" id="github-env-import" autocomplete="off">
+                    <small>只有勾选托管并确认保存后才读取。远端没有 .env 时使用此文件；不选择则仅用表单令牌创建。已有远端 .env 时保留其内容，此文件不生效。内容不显示、不保存到浏览器存储。</small>
+                </div>
                 <div class="tips">
                     <h4>🔒 安全与同步说明</h4>
                     <ul>
@@ -4964,8 +4970,8 @@
                     type: acc.type || 'newapi', accountId: acc.accountId || acc.account_id || '',
                     enabled: acc.enabled === undefined ? true : acc.enabled,
                     session: acc.session || '',
-                    accessToken: acc.accessToken || acc.access_token || acc.session_token || '',
-                    accessTokenEnv: acc.accessTokenEnv || acc.access_token_env || acc.session_token_env || '',
+                    accessToken: acc.accessToken || acc.access_token || acc.session_token || acc.refresh_token || acc.refreshToken || '',
+                    accessTokenEnv: acc.accessTokenEnv || acc.access_token_env || acc.session_token_env || acc.refresh_token_env || '',
                     userId: acc.userId || acc.user_id || '',
                     name: acc.name || '',
                     loginUser: acc.loginUser || acc.login_username || '',

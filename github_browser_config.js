@@ -1,8 +1,9 @@
 globalThis.GitHubBrowserConfig = (() => {
     const accountFile = 'accounts.config.json';
     const workflowFiles = ['.github/workflows/checkin.yml', '.github/workflows/checkin-gha-test.yml'];
-    const publicFields = new Set(['type', 'url', 'user_id', 'name', 'access_token_env', 'cf_clearance_env', 'account_id', 'session_token_env', 'enabled']);
-    const reservedNames = new Set([
+    const publicFields = new Set(['type', 'url', 'user_id', 'name', 'access_token_env', 'cf_clearance_env', 'account_id', 'session_token_env', 'refresh_token_env', 'enabled']);
+    const automationSecret = 'TOKENBOM_SECRETS_PAT';
+    const reservedNames = new Set([automationSecret, 'TOKENBOM_WRITE_CHECK',
         'NEWAPI_CONFIG_FILE', 'NEWAPI_ACCOUNTS', 'NEWAPI_PROXY', 'NEWAPI_CAPTCHA_OCR', 'CONFIG_URL', 'CONFIG_AUTH', 'NOTIFY_ONLY_FAILURE',
         'PATH', 'HOME', 'PYTHONPATH', 'PYTHONHOME', 'LD_PRELOAD', 'LD_LIBRARY_PATH', 'BASH_ENV', 'ENV',
         'DINGTALK_WEBHOOK', 'DINGTALK_SECRET', 'SERVERCHAN_SENDKEY', 'PUSHPLUS_TOKEN', 'EMAIL_SMTP_HOST',
@@ -38,19 +39,22 @@ globalThis.GitHubBrowserConfig = (() => {
             }
             const url = parsed.href.replace(/\/+$/, '');
             const kind = account.type === undefined ? 'newapi' : account.type;
-            if (!['newapi', 'vyceai'].includes(kind)) throw new Error('不支持的站点类型，仅支持 newapi / vyceai');
+            if (!['newapi', 'vyceai', 'tokenbom'].includes(kind)) throw new Error('不支持的站点类型，仅支持 newapi / vyceai / tokenbom');
             let identifier, tokenName, publicAccount;
-            if (kind === 'vyceai') {
-                const fields = new Set(['type', 'url', 'account_id', 'name', 'session_token_env', 'enabled']);
-                if (Object.keys(account).some(key => !fields.has(key))) throw new Error('VyceAI 不使用 NewAPI 认证字段');
+            if (kind === 'vyceai' || kind === 'tokenbom') {
+                const reference = kind === 'tokenbom' ? 'refresh_token_env' : 'session_token_env';
+                const label = kind === 'tokenbom' ? 'TokenBom' : 'VyceAI';
+                if (kind === 'tokenbom' && parsed.protocol !== 'https:') throw new Error('TokenBom 必须使用 HTTPS 站点地址');
+                const fields = new Set(['type', 'url', 'account_id', 'name', reference, 'enabled']);
+                if (Object.keys(account).some(key => !fields.has(key))) throw new Error(label + ' 不能混用其他站点的认证字段');
                 identifier = account.account_id;
                 if (typeof identifier !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(identifier)) {
-                    throw new Error('VyceAI account_id 必须是 1–80 位字母、数字、下划线或短横线');
+                    throw new Error(label + ' account_id 必须是 1–80 位字母、数字、下划线或短横线');
                 }
-                tokenName = validateEnvName(account.session_token_env);
-                publicAccount = {type: kind, url, account_id: identifier, session_token_env: tokenName};
+                tokenName = validateEnvName(account[reference]);
+                publicAccount = {type: kind, url, account_id: identifier, [reference]: tokenName};
             } else {
-                if ('account_id' in account || 'session_token_env' in account) throw new Error('NewAPI 不使用 VyceAI 认证字段');
+                if ('account_id' in account || 'session_token_env' in account || 'refresh_token_env' in account) throw new Error('NewAPI 不使用 VyceAI 认证字段');
                 if (!['string', 'number'].includes(typeof account.user_id)
                         || (typeof account.user_id === 'number' && !Number.isSafeInteger(account.user_id))) {
                     throw new Error('用户 ID 必须是来自站点个人信息的正整数');
@@ -83,12 +87,16 @@ globalThis.GitHubBrowserConfig = (() => {
     }
 
     function envNames(accounts) {
-        return [...new Set(accounts.flatMap(account => [account.access_token_env, account.session_token_env, account.cf_clearance_env].filter(Boolean)))];
+        return [...new Set(accounts.flatMap(account => [account.access_token_env, account.session_token_env, account.refresh_token_env, account.cf_clearance_env].filter(Boolean)))];
+    }
+
+    function workflowNames(accounts) {
+        return [...envNames(accounts), ...(accounts.some(account => account.type === 'tokenbom') ? [automationSecret] : [])];
     }
 
     function accountIdentity(account) {
         return JSON.stringify([account.type || 'newapi', account.url,
-            account.type === 'vyceai' ? account.account_id : account.user_id]);
+            ['vyceai', 'tokenbom'].includes(account.type) ? account.account_id : account.user_id]);
     }
 
     function mergeAccounts(existing, incoming, mode) {
@@ -533,7 +541,12 @@ globalThis.GitHubBrowserConfig = (() => {
             const accounts = mergeAccounts(existing, incoming, payload.mode === undefined ? 'merge' : payload.mode);
             const names = envNames(accounts);
             const requiredNames = envNames(accounts.filter(account => account.enabled !== false));
-            const secretNames = pushplus.mode === 'enable' ? [...names, 'PUSHPLUS_TOKEN'] : names;
+            const hasTokenbom = accounts.some(account => account.type === 'tokenbom');
+            const activeTokenbom = accounts.some(account => account.type === 'tokenbom' && account.enabled !== false);
+            if (hasTokenbom && !snapshot.privateRepository) throw new Error('TokenBom 自动续期仅支持私有签到仓库');
+            if (activeTokenbom && !flags.sync_secrets) throw new Error('启用 TokenBom 必须同步 Secrets，以便校验自动续期凭证');
+            const requiredSecrets = [...requiredNames, ...(activeTokenbom ? [automationSecret] : [])];
+            const secretNames = [...workflowNames(accounts), ...(pushplus.mode === 'enable' ? ['PUSHPLUS_TOKEN'] : [])];
             const inputValues = payload.secrets ?? {};
             if (!inputValues || typeof inputValues !== 'object' || Array.isArray(inputValues)
                     || Object.keys(inputValues).some(name => !secretNames.includes(name))) throw new Error('凭证只能对应当前账号的环境变量名或本次启用的 PUSHPLUS_TOKEN');
@@ -547,11 +560,14 @@ globalThis.GitHubBrowserConfig = (() => {
             if (Object.keys(providedValues).length && !flags.include_env && !flags.sync_secrets) {
                 throw new Error('已填写令牌，请选择同步 Secrets 或私有仓库 .env，避免丢失凭证');
             }
+            const automationPat = providedValues[automationSecret];
+            delete providedValues[automationSecret];
+            if (automationPat && !flags.sync_secrets) throw new Error('TOKENBOM_SECRETS_PAT 只能加密同步到 Actions Secrets');
             const files = new Map([[accountFile, JSON.stringify(accounts, null, 2) + '\n']]);
             for (const path of workflowFiles) {
                 const content = await snapshot.read(path);
                 if (content === null) throw new Error('远端缺少签到工作流，请先将项目代码推送到仓库');
-                files.set(path, updatePushplusWorkflow(updateWorkflow(content, envNames(existing), names), pushplus));
+                files.set(path, updatePushplusWorkflow(updateWorkflow(content, workflowNames(existing), workflowNames(accounts)), pushplus));
             }
             if (flags.include_env) {
                 const remoteEnv = await snapshot.read('.env');
@@ -567,15 +583,16 @@ globalThis.GitHubBrowserConfig = (() => {
             if (flags.sync_secrets) {
                 const existingSecrets = await client.secretNames();
                 const secretValues = {...providedValues};
+                if (automationPat) secretValues[automationSecret] = automationPat;
                 const hostedValues = envValues(files.get('.env') || '');
                 names.forEach(name => {
                     if (!existingSecrets.has(name) && !secretValues[name] && hostedValues[name]) secretValues[name] = hostedValues[name];
                 });
-                const missing = [...new Set([...requiredNames, ...(pushplus.mode === 'enable' ? ['PUSHPLUS_TOKEN'] : [])])].filter(name => !existingSecrets.has(name) && !secretValues[name]);
+                const missing = [...new Set([...requiredSecrets, ...(pushplus.mode === 'enable' ? ['PUSHPLUS_TOKEN'] : [])])].filter(name => !existingSecrets.has(name) && !secretValues[name]);
                 if (missing.length) throw new Error('缺少 Actions Secret，请填写对应令牌：' + missing.join('、') + '。本次尚未写入任何文件或 Secrets。');
                 encrypted = await encryptSecrets(client, secretValues);
             }
-            if (flags.include_env && (await client.request('GET')).private !== true) throw new Error('仓库已变为公开，已取消 .env 上传；请检查仓库可见性后重试');
+            if ((flags.include_env || hasTokenbom) && (await client.request('GET')).private !== true) throw new Error('仓库已变为公开，已取消 .env 上传；请检查仓库可见性后重试');
             const commit = await snapshot.commit(files);
             const savedSecrets = [];
             const failedSecrets = [];

@@ -13,7 +13,7 @@ globalThis.AccountExports = (() => {
             let tokenEnv = row.accessTokenEnv;
             if (!tokenEnv) {
                 let number = 1;
-                const prefix = row.type === 'vyceai' ? 'VYCEAI_SESSION_TOKEN_ACCOUNT' : 'NEWAPI_TOKEN_ACCOUNT';
+                const prefix = row.type === 'tokenbom' ? 'TOKENBOM_REFRESH_TOKEN_ACCOUNT' : row.type === 'vyceai' ? 'VYCEAI_SESSION_TOKEN_ACCOUNT' : 'NEWAPI_TOKEN_ACCOUNT';
                 while (used.has(prefix + number)) number += 1;
                 tokenEnv = prefix + number;
                 used.add(tokenEnv);
@@ -21,10 +21,10 @@ globalThis.AccountExports = (() => {
             const url = String(row.url || '').trim();
             const account = {url: url.includes('://') ? url : 'https://' + url, name: row.name,
                 enabled: row.enabled === undefined ? true : row.enabled,
-                ...(row.type === 'vyceai' ? {type: 'vyceai', account_id: row.accountId, session_token_env: tokenEnv}
+                ...(row.type !== 'newapi' ? {type: row.type, account_id: row.accountId, [row.type === 'tokenbom' ? 'refresh_token_env' : 'session_token_env']: tokenEnv}
                     : {user_id: row.userId, access_token_env: tokenEnv})};
             const clearanceEnv = row.cfClearanceEnv || (row.cfClearance ? 'CF_CLEARANCE_' + tokenEnv : '');
-            if (clearanceEnv && row.type !== 'vyceai') account.cf_clearance_env = clearanceEnv;
+            if (clearanceEnv && row.type === 'newapi') account.cf_clearance_env = clearanceEnv;
             return account;
         });
         const publicAccounts = GitHubBrowserConfig.validateAccounts(metadata);
@@ -40,8 +40,8 @@ globalThis.AccountExports = (() => {
         }
         const legacyAccounts = publicAccounts.map((account, index) => {
             const row = rows[index];
-            if (account.type === 'vyceai') {
-                addSecret(account.session_token_env, row.accessToken);
+            if (account.type === 'vyceai' || account.type === 'tokenbom') {
+                addSecret(account.refresh_token_env || account.session_token_env, row.accessToken);
                 return {...account};
             }
             const legacy = {url: account.url, user_id: account.user_id, name: account.name,
@@ -60,7 +60,7 @@ globalThis.AccountExports = (() => {
     }
 
     function simple(accounts) {
-        if (accounts.some(account => account.enabled === false || account.type === 'vyceai' || !account.session || account.access_token || account.access_token_env
+        if (accounts.some(account => account.enabled === false || account.type === 'vyceai' || account.type === 'tokenbom' || !account.session || account.access_token || account.access_token_env
                 || account.cf_clearance || account.cf_clearance_env || account.login_username || account.login_password
                 || /[,#]/.test(account.session) || /[,#]/.test(account.url))) {
             return '简单格式仅适用于旧版 Session；系统令牌、启停状态、变量引用及高级选项请使用 JSON，避免丢失用户 ID 或配置。';

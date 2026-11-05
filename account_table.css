@@ -111,6 +111,16 @@ html[data-theme="dark"] .github-settings-heading p { color: #94a3b8; }
 .account-enabled-label { display: flex; align-items: center; gap: 8px; min-height: 40px; }
 .account-editor [hidden] { display: none !important; }
 .account-enabled-cell { white-space: nowrap; }
+.account-sync-cell { white-space: nowrap; }
+.account-sync-badge { display: inline-block; padding: 4px 6px; border-radius: 5px; font-size: 12px; }
+.account-sync-badge.is-synced { color: #64748b; background: #f1f5f9; }
+.account-sync-badge.is-new { color: #0369a1; background: #e0f2fe; }
+.account-sync-badge.is-modified { color: #92400e; background: #fef3c7; }
+.account-table tr[data-sync-state="new"] td:first-child { box-shadow: inset 3px 0 #38bdf8; }
+.account-table tr[data-sync-state="modified"] td:first-child { box-shadow: inset 3px 0 #fbbf24; }
+html[data-theme="dark"] .account-sync-badge.is-synced { color: #94a3b8; background: #1e293b; }
+html[data-theme="dark"] .account-sync-badge.is-new { color: #7dd3fc; background: #0c4a6e; }
+html[data-theme="dark"] .account-sync-badge.is-modified { color: #fde68a; background: #78350f; }
 .account-enabled-toggle { padding: 6px 10px; border: 1px solid #a7d7bd; border-radius: 7px; color: #166534; background: #ecfdf5; font: inherit; cursor: pointer; white-space: nowrap; }
 .account-enabled-toggle[aria-checked="false"] { color: #64748b; background: #f1f5f9; border-color: #cbd5e1; }
 .account-enabled-toggle:focus-visible { outline: 2px solid #0284c7; outline-offset: 2px; }
