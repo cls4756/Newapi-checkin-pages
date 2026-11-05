@@ -6,7 +6,7 @@
     background: var(--table-background);
     border: 1px solid var(--table-border);
     border-radius: 16px;
-    padding: 24px;
+    padding: 18px;
     margin-bottom: 20px;
     color: #1e293b;
 }
@@ -20,7 +20,7 @@
 }
 .account-table-heading h2 { margin: 0 0 6px; font-size: 21px; }
 .account-table-heading p, .account-table-help, .account-table-pagination { color: var(--table-muted); font-size: 13px; }
-.account-table-toolbar { margin: 20px 0 14px; }
+.account-table-toolbar { margin: 14px 0 10px; }
 .account-search-field { flex: 1; min-width: 220px; }
 .account-search-field input { width: 100%; }
 .account-table-panel input, .account-table-panel select {
@@ -34,12 +34,12 @@
 .account-table-scroll { width: 100%; overflow-x: auto; border: 1px solid var(--table-border); border-radius: 10px; }
 .account-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; }
 .account-table th { background: var(--table-heading); white-space: nowrap; font-weight: 600; }
-.account-table th, .account-table td { padding: 13px 12px; border-bottom: 1px solid var(--table-border); vertical-align: middle; }
+.account-table th, .account-table td { padding: 8px 10px; border-bottom: 1px solid var(--table-border); vertical-align: middle; }
 .account-table tbody tr:last-child td { border-bottom: 0; }
 .account-table tbody tr:hover { background: var(--table-heading); }
-.account-table td { max-width: 260px; overflow-wrap: anywhere; }
+.account-table td { max-width: 360px; overflow-wrap: anywhere; }
 .account-variable-cell { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
-.account-url-cell { min-width: 180px; }
+.account-url-cell { min-width: 190px; }
 .account-url-cell a { color: #0284c7; text-decoration: none; }
 .account-url-cell a:hover { text-decoration: underline; }
 .account-table .account-row-actions { min-width: 145px; white-space: nowrap; }
@@ -106,6 +106,18 @@ html[data-theme="dark"] .github-settings-heading p { color: #94a3b8; }
 .account-editor-grid .form-group { margin-bottom: 0; min-width: 0; }
 .account-editor-wide { grid-column: 1 / -1; }
 .account-editor input, .account-editor textarea { width: 100%; box-sizing: border-box; }
+.account-editor select { width: 100%; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 8px; font: inherit; }
+.account-editor input[type="checkbox"] { width: 18px; height: 18px; accent-color: #0284c7; }
+.account-enabled-label { display: flex; align-items: center; gap: 8px; min-height: 40px; }
+.account-editor [hidden] { display: none !important; }
+.account-enabled-cell { white-space: nowrap; }
+.account-enabled-toggle { padding: 6px 10px; border: 1px solid #a7d7bd; border-radius: 7px; color: #166534; background: #ecfdf5; font: inherit; cursor: pointer; white-space: nowrap; }
+.account-enabled-toggle[aria-checked="false"] { color: #64748b; background: #f1f5f9; border-color: #cbd5e1; }
+.account-enabled-toggle:focus-visible { outline: 2px solid #0284c7; outline-offset: 2px; }
+.account-table .btn-xs { padding: 6px 10px; }
+.account-is-disabled .account-url-cell, .account-is-disabled .account-variable-cell { opacity: .65; }
+html[data-theme="dark"] .account-enabled-toggle { background: #12352e; color: #86efac; border-color: #27634b; }
+html[data-theme="dark"] .account-enabled-toggle[aria-checked="false"] { background: #1e293b; color: #94a3b8; border-color: #475569; }
 .account-editor label { color: inherit; }
 .account-editor small { display: block; line-height: 1.6; margin-top: 6px; color: #64748b; }
 .account-editor details { margin-top: 20px; }
@@ -132,4 +144,7 @@ html[data-theme="dark"] .account-table-status { color: #7dd3fc; }
     .account-editor-grid { grid-template-columns: 1fr; }
     .github-settings-body .cloud-fields { grid-template-columns: 1fr; }
     .account-search-field { min-width: 100%; }
+}
+@media (min-width: 841px) {
+    .content { padding: 22px 24px; }
 }

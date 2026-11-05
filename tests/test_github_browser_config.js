@@ -143,6 +143,27 @@ async function runTest(name, callback) {
 }
 
 async function main() {
+
+    await runTest('account pause and resume preserve identity, workflow references and Secrets', async () => {
+        for (const original of [account(), {type: 'vyceai', url: 'https://synthetic.example', account_id: 'synthetic-stable', name: 'VyceAI', session_token_env: 'NEW_TOKEN'}]) {
+            const {api, service, payload} = await createService();
+            const paused = {...original, enabled: false};
+            const saved = await service.handle({...payload, accounts: [paused], secrets: {}});
+            assert.equal(saved.accounts[1].enabled, false);
+            assert.equal(api.secrets.size, 1);
+            assert.ok(!api.readPaths.includes('.env'));
+            for (const path of workflowFiles) assert.ok(api.files.get(path).includes('NEW_TOKEN: ' + String.fromCharCode(36) + '{{ secrets.NEW_TOKEN }}'));
+            await assert.rejects(() => service.handle({...payload, accounts: [{...paused, enabled: true}], secrets: {}}), /Secret/);
+            api.secrets.add('NEW_TOKEN');
+            const resumed = await service.handle({...payload, accounts: [{...paused, enabled: true}], secrets: {}});
+            assert.equal(resumed.accounts.length, 2);
+            assert.equal(resumed.accounts[1].enabled, true);
+            assert.ok(!api.calls.some(call => ['PUT', 'DELETE'].includes(call.method)));
+            for (const value of ['false', null, 0, 1]) {
+                assert.throws(() => service.validateAccounts([{...original, enabled: value}]), /enabled/);
+            }
+        }
+    });
     await runTest('bundled crypto has pinned integrity values and never requires a third-party CDN', async () => {
         const expected = {
             'vendor/libsodium.js': '8abec6b42fafb418f58bff3fd665005b3e700ee02dae5042ce5704d27e6fcb23',

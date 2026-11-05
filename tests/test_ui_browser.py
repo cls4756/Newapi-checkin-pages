@@ -78,6 +78,60 @@ class BrowserTests(unittest.TestCase):
             self.page.get_by_role('button', name='⚙️ 设置', exact=True).click()
         expect(self.page.locator('#github-settings-dialog')).to_be_visible()
 
+    def test_pause_resume_and_vyceai_editor_preserve_public_configuration(self):
+        self.add_account()
+        toggle = self.page.get_by_role('switch', name='启用签到：Fictional account', exact=True)
+        expect(toggle).to_have_attribute('aria-checked', 'true')
+        toggle.click()
+        public = self.page.evaluate('generateConfig(false)')
+        self.assertIs(public[0]['enabled'], False)
+        self.assertNotIn('fictional-account-token', json.dumps(public))
+        self.page.evaluate('loadFlatData', public)
+        expect(toggle).to_have_attribute('aria-checked', 'false')
+        toggle.click()
+        self.assertIs(self.page.evaluate('generateConfig(false)')[0]['enabled'], True)
+        self.page.locator('#account-add').click()
+        self.page.locator('#account-field-type').select_option('vyceai')
+        expect(self.page.locator('#account-field-userId')).to_be_hidden()
+        self.page.locator('#account-field-name').fill('VyceAI synthetic')
+        self.page.locator('#account-field-accessToken').fill('synthetic-session-token')
+        self.page.locator('#account-field-enabled').uncheck()
+        self.page.get_by_role('button', name='保存到表格', exact=True).click()
+        vyce = self.page.evaluate('generateConfig(false)')[1]
+        self.assertEqual(vyce['type'], 'vyceai')
+        self.assertIs(vyce['enabled'], False)
+        self.assertNotIn('user_id', vyce)
+        self.page.get_by_role('button', name='编辑账号：VyceAI synthetic', exact=True).click()
+        self.page.locator('#account-field-accessTokenEnv').fill('VYCEAI_ROTATED')
+        self.page.get_by_role('button', name='保存到表格', exact=True).click()
+        updated = self.page.evaluate('generateConfig(false)')[1]
+        self.assertEqual(updated['account_id'], vyce['account_id'])
+        self.assertEqual(updated['session_token_env'], 'VYCEAI_ROTATED')
+        self.assertIs(updated['enabled'], False)
+        exported = self.page.evaluate('AccountExports.build(collectFormData())')
+        self.assertEqual(exported['secrets']['VYCEAI_ROTATED'], 'synthetic-session-token')
+        self.assertNotIn('synthetic-session-token', json.dumps(exported['publicAccounts']))
+        self.page.evaluate('loadFlatData', exported['publicAccounts'])
+        self.assertEqual(self.page.evaluate('generateConfig(false)'), exported['publicAccounts'])
+
+    def test_wide_table_and_mobile_editor_layout(self):
+        self.page.set_viewport_size({'width': 1600, 'height': 1000})
+        self.page.evaluate('''() => loadFlatData(Array.from({length: 10}, (_, i) => ({
+            url: 'https://synthetic.example', user_id: String(i + 1), name: 'Synthetic account ' + (i + 1),
+            access_token_env: 'SYNTHETIC_TOKEN_' + i, enabled: i % 2 === 0})))''')
+        box = self.page.locator('.container').bounding_box()
+        self.assertGreaterEqual(box['width'], 1400)
+        self.assertLessEqual(box['x'], 100)
+        first_row = self.page.locator('#account-table-body tr').first.bounding_box()
+        self.assertLessEqual(first_row['height'], 70)
+        self.page.set_viewport_size({'width': 390, 'height': 844})
+        self.page.locator('#account-add').click()
+        editor = self.page.locator('#account-editor').bounding_box()
+        self.assertGreaterEqual(editor['x'], 0)
+        self.assertLessEqual(editor['width'], 390)
+        self.assertEqual(self.page.locator('.account-editor-grid').first.evaluate(
+            '(node) => getComputedStyle(node).gridTemplateColumns.split(" ").length'), 1)
+
     def open_sync(self):
         if not self.page.locator('#github-section').is_visible():
             self.page.get_by_role('button', name='🐙 GitHub 同步', exact=True).click()

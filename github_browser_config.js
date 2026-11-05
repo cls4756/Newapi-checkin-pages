@@ -1,7 +1,7 @@
 globalThis.GitHubBrowserConfig = (() => {
     const accountFile = 'accounts.config.json';
     const workflowFiles = ['.github/workflows/checkin.yml', '.github/workflows/checkin-gha-test.yml'];
-    const publicFields = new Set(['url', 'user_id', 'name', 'access_token_env', 'cf_clearance_env']);
+    const publicFields = new Set(['type', 'url', 'user_id', 'name', 'access_token_env', 'cf_clearance_env', 'account_id', 'session_token_env', 'enabled']);
     const reservedNames = new Set([
         'NEWAPI_CONFIG_FILE', 'NEWAPI_ACCOUNTS', 'NEWAPI_PROXY', 'NEWAPI_CAPTCHA_OCR', 'CONFIG_URL', 'CONFIG_AUTH', 'NOTIFY_ONLY_FAILURE',
         'PATH', 'HOME', 'PYTHONPATH', 'PYTHONHOME', 'LD_PRELOAD', 'LD_LIBRARY_PATH', 'BASH_ENV', 'ENV',
@@ -37,20 +37,40 @@ globalThis.GitHubBrowserConfig = (() => {
                 throw new Error('站点 URL 必须是 http/https 地址，不能包含凭证、查询参数或片段');
             }
             const url = parsed.href.replace(/\/+$/, '');
-            if (!['string', 'number'].includes(typeof account.user_id)
-                    || (typeof account.user_id === 'number' && !Number.isSafeInteger(account.user_id))) {
-                throw new Error('用户 ID 必须是来自站点个人信息的正整数');
+            const kind = account.type === undefined ? 'newapi' : account.type;
+            if (!['newapi', 'vyceai'].includes(kind)) throw new Error('不支持的站点类型，仅支持 newapi / vyceai');
+            let identifier, tokenName, publicAccount;
+            if (kind === 'vyceai') {
+                const fields = new Set(['type', 'url', 'account_id', 'name', 'session_token_env', 'enabled']);
+                if (Object.keys(account).some(key => !fields.has(key))) throw new Error('VyceAI 不使用 NewAPI 认证字段');
+                identifier = account.account_id;
+                if (typeof identifier !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(identifier)) {
+                    throw new Error('VyceAI account_id 必须是 1–80 位字母、数字、下划线或短横线');
+                }
+                tokenName = validateEnvName(account.session_token_env);
+                publicAccount = {type: kind, url, account_id: identifier, session_token_env: tokenName};
+            } else {
+                if ('account_id' in account || 'session_token_env' in account) throw new Error('NewAPI 不使用 VyceAI 认证字段');
+                if (!['string', 'number'].includes(typeof account.user_id)
+                        || (typeof account.user_id === 'number' && !Number.isSafeInteger(account.user_id))) {
+                    throw new Error('用户 ID 必须是来自站点个人信息的正整数');
+                }
+                identifier = String(account.user_id).trim();
+                if (!/^[1-9][0-9]*$/.test(identifier)) throw new Error('用户 ID 必须是来自站点个人信息的正整数');
+                tokenName = validateEnvName(account.access_token_env);
+                publicAccount = {url, user_id: identifier, access_token_env: tokenName};
             }
-            const userId = String(account.user_id).trim();
-            if (!/^[1-9][0-9]*$/.test(userId)) throw new Error('用户 ID 必须是来自站点个人信息的正整数');
-            const tokenName = validateEnvName(account.access_token_env);
-            const identity = JSON.stringify([url, userId]);
+            const identity = JSON.stringify([kind, url, identifier]);
             if (identities.has(identity) || tokenNames.has(tokenName)) {
                 throw new Error('账号重复或令牌变量名冲突；请先从 GitHub 加载，并为不同账号使用独立变量名');
             }
-            const name = account.name || `${parsed.hostname}-${userId}`;
+            const name = account.name || `${parsed.hostname}-${identifier}`;
             if (typeof name !== 'string' || name.length > 200) throw new Error('备注名称必须是不超过 200 个字符的文本');
-            const publicAccount = {url, user_id: userId, name, access_token_env: tokenName};
+            publicAccount.name = name;
+            if ('enabled' in account) {
+                if (typeof account.enabled !== 'boolean') throw new Error('enabled 必须是布尔值 true 或 false');
+                publicAccount.enabled = account.enabled;
+            }
             if (account.cf_clearance_env) publicAccount.cf_clearance_env = validateEnvName(account.cf_clearance_env);
             identities.add(identity);
             tokenNames.add(tokenName);
@@ -63,15 +83,20 @@ globalThis.GitHubBrowserConfig = (() => {
     }
 
     function envNames(accounts) {
-        return [...new Set(accounts.flatMap(account => [account.access_token_env, account.cf_clearance_env].filter(Boolean)))];
+        return [...new Set(accounts.flatMap(account => [account.access_token_env, account.session_token_env, account.cf_clearance_env].filter(Boolean)))];
+    }
+
+    function accountIdentity(account) {
+        return JSON.stringify([account.type || 'newapi', account.url,
+            account.type === 'vyceai' ? account.account_id : account.user_id]);
     }
 
     function mergeAccounts(existing, incoming, mode) {
         if (mode === 'replace') return validateAccounts(incoming);
         if (mode !== 'merge') throw new Error('账号保存模式必须是 merge 或 replace');
-        const merged = new Map(existing.map(account => [JSON.stringify([account.url, account.user_id]), {...account}]));
+        const merged = new Map(existing.map(account => [accountIdentity(account), {...account}]));
         incoming.forEach(account => {
-            const identity = JSON.stringify([account.url, account.user_id]);
+            const identity = accountIdentity(account);
             merged.set(identity, {...merged.get(identity), ...account});
         });
         return validateAccounts([...merged.values()]);
@@ -503,10 +528,11 @@ globalThis.GitHubBrowserConfig = (() => {
             const pushplus = pushplusOptions(payload);
             if (pushplus.mode === 'enable' && !flags.sync_secrets) throw new Error('启用 PushPlus 必须勾选自动同步 Actions Secrets，Token 只通过加密 Secret 保存');
             const incoming = validateAccounts(payload.accounts);
-            if (!incoming.length) throw new Error('至少需要配置一个账号');
+            if (!incoming.length && payload.mode !== 'replace') throw new Error('至少需要配置一个账号');
             const existing = await readAccounts(snapshot);
             const accounts = mergeAccounts(existing, incoming, payload.mode === undefined ? 'merge' : payload.mode);
             const names = envNames(accounts);
+            const requiredNames = envNames(accounts.filter(account => account.enabled !== false));
             const secretNames = pushplus.mode === 'enable' ? [...names, 'PUSHPLUS_TOKEN'] : names;
             const inputValues = payload.secrets ?? {};
             if (!inputValues || typeof inputValues !== 'object' || Array.isArray(inputValues)
@@ -532,7 +558,7 @@ globalThis.GitHubBrowserConfig = (() => {
                 const template = remoteEnv === null ? await (options.readEnvTemplate?.() ?? '') : remoteEnv;
                 if (typeof template !== 'string' || new TextEncoder().encode(template).length > 1024 * 1024) throw new Error('.env 模板必须是小于 1 MB 的文本');
                 const updatedEnv = updateEnvContent(template, names, providedValues);
-                const missing = names.filter(name => !envValues(updatedEnv)[name]);
+                const missing = requiredNames.filter(name => !envValues(updatedEnv)[name]);
                 if (missing.length) throw new Error('.env 缺少令牌：' + missing.join('、')
                     + '。请在表单中填写，或首次选择 .env 文件；首次创建需要保存后全部账号的令牌，已有 Actions Secrets 的值无法读回。也可取消明文 .env 托管。本次尚未写入任何文件或 Secrets。');
                 files.set('.env', updatedEnv);
@@ -545,7 +571,7 @@ globalThis.GitHubBrowserConfig = (() => {
                 names.forEach(name => {
                     if (!existingSecrets.has(name) && !secretValues[name] && hostedValues[name]) secretValues[name] = hostedValues[name];
                 });
-                const missing = secretNames.filter(name => !existingSecrets.has(name) && !secretValues[name]);
+                const missing = [...new Set([...requiredNames, ...(pushplus.mode === 'enable' ? ['PUSHPLUS_TOKEN'] : [])])].filter(name => !existingSecrets.has(name) && !secretValues[name]);
                 if (missing.length) throw new Error('缺少 Actions Secret，请填写对应令牌：' + missing.join('、') + '。本次尚未写入任何文件或 Secrets。');
                 encrypted = await encryptSecrets(client, secretValues);
             }

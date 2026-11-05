@@ -1,6 +1,6 @@
 globalThis.AccountTable = (() => {
     const fieldNames = ['url', 'userId', 'name', 'accessTokenEnv', 'accessToken',
-        'cfClearanceEnv', 'cfClearance', 'session', 'loginUser', 'loginPass'];
+        'cfClearanceEnv', 'cfClearance', 'session', 'loginUser', 'loginPass', 'type', 'accountId'];
     let rows = [];
     let nextId = 1;
     let editingId = null;
@@ -19,7 +19,8 @@ globalThis.AccountTable = (() => {
     }
 
     function normalize(values) {
-        return Object.fromEntries(fieldNames.map(field => [field, text(values[field])]));
+        return {...Object.fromEntries(fieldNames.map(field => [field, text(values[field])])),
+            type: values.type || 'newapi', enabled: values.enabled === undefined ? true : values.enabled};
     }
 
     function normalizedUrl(value) {
@@ -45,15 +46,17 @@ globalThis.AccountTable = (() => {
         } catch {
             url = account.url;
         }
-        return JSON.stringify([url, account.userId]);
+        return JSON.stringify([account.type || 'newapi', url,
+            account.type === 'vyceai' ? account.accountId : account.userId]);
     }
 
-    function nextTokenName(accounts, usedNames = allocatedNames) {
+    function nextTokenName(accounts, usedNames = allocatedNames, type = 'newapi') {
         const used = new Set([...usedNames,
             ...accounts.flatMap(account => [account.accessTokenEnv, account.cfClearanceEnv])]);
         let tokenNumber = 1;
-        while (used.has('NEWAPI_TOKEN_ACCOUNT' + tokenNumber)) tokenNumber += 1;
-        return 'NEWAPI_TOKEN_ACCOUNT' + tokenNumber;
+        const prefix = type === 'vyceai' ? 'VYCEAI_SESSION_TOKEN_ACCOUNT' : 'NEWAPI_TOKEN_ACCOUNT';
+        while (used.has(prefix + tokenNumber)) tokenNumber += 1;
+        return prefix + tokenNumber;
     }
 
     function status(message, isError = false) {
@@ -65,7 +68,12 @@ globalThis.AccountTable = (() => {
     function validateFields(values) {
         const account = normalize(values);
         account.url = normalizedUrl(account.url);
-        if (!/^[1-9][0-9]*$/.test(account.userId)) throw new Error('用户 ID 必须是站点个人信息中的正整数');
+        if (!['newapi', 'vyceai'].includes(account.type)) throw new Error('不支持的站点类型');
+        if (typeof account.enabled !== 'boolean') throw new Error('enabled 必须是布尔值 true 或 false');
+        if (account.type === 'vyceai') {
+            if (!/^[A-Za-z0-9_-]{1,80}$/.test(account.accountId)) throw new Error('VyceAI 需要有效的稳定账号标识 account_id');
+            for (const field of ['userId', 'cfClearanceEnv', 'cfClearance', 'session', 'loginUser', 'loginPass']) account[field] = '';
+        } else if (!/^[1-9][0-9]*$/.test(account.userId)) throw new Error('用户 ID 必须是站点个人信息中的正整数');
         if (account.name.length > 200) throw new Error('备注名称不能超过 200 个字符');
         if ((account.accessTokenEnv && !/^[A-Z_][A-Z0-9_]*$/.test(account.accessTokenEnv))
                 || (account.cfClearanceEnv && !/^[A-Z_][A-Z0-9_]*$/.test(account.cfClearanceEnv))) {
@@ -79,7 +87,7 @@ globalThis.AccountTable = (() => {
 
     function validateAccount(values, others, previous, usedNames = allocatedNames) {
         const account = validateFields(values);
-        if (!account.accessTokenEnv) account.accessTokenEnv = previous?.accessTokenEnv || nextTokenName(others, usedNames);
+        if (!account.accessTokenEnv) account.accessTokenEnv = previous?.accessTokenEnv || nextTokenName(others, usedNames, account.type);
         if (account.cfClearance && !account.cfClearanceEnv) account.cfClearanceEnv = 'CF_CLEARANCE_' + account.accessTokenEnv;
         GitHubBrowserConfig.validateEnvName(account.accessTokenEnv);
         if (account.cfClearanceEnv) GitHubBrowserConfig.validateEnvName(account.cfClearanceEnv);
@@ -146,11 +154,14 @@ globalThis.AccountTable = (() => {
                 if (!values || typeof values !== 'object' || Array.isArray(values)) throw new Error('账号配置格式错误');
                 if (imported.length >= 200) throw new Error('最多支持 200 个账号');
                 const account = validateFields({
+                    type: values.type ?? entry.type,
+                    accountId: values.accountId ?? values.account_id,
+                    enabled: values.enabled,
                     url: values.url ?? entry.url,
                     userId: values.userId ?? values.user_id,
                     name: values.name,
-                    accessTokenEnv: values.accessTokenEnv ?? values.access_token_env,
-                    accessToken: values.accessToken ?? values.access_token,
+                    accessTokenEnv: values.accessTokenEnv ?? values.access_token_env ?? values.session_token_env,
+                    accessToken: values.accessToken ?? values.access_token ?? values.session_token,
                     cfClearanceEnv: values.cfClearanceEnv ?? values.cf_clearance_env ?? entry.cfClearanceEnv ?? entry.cf_clearance_env,
                     cfClearance: values.cfClearance ?? values.cf_clearance ?? entry.cfClearance ?? entry.cf_clearance,
                     session: values.session,
@@ -177,6 +188,7 @@ globalThis.AccountTable = (() => {
         for (const incoming of imported) {
             const previous = rows.find(row => identity(row) === identity(incoming));
             const values = Object.fromEntries(fieldNames.map(field => [field, incoming[field] || previous?.[field] || '']));
+            values.enabled = incoming.enabled;
             const account = validateAccount(values, stagedRows.filter(row => row.id !== previous?.id), previous, stagedNames);
             stagedNames.add(account.accessTokenEnv);
             if (account.cfClearanceEnv) stagedNames.add(account.cfClearanceEnv);
@@ -214,13 +226,16 @@ globalThis.AccountTable = (() => {
             site.accounts.forEach(account => {
                 if (!account || typeof account !== 'object') throw new Error('账号配置格式错误');
                 imported.push(normalize({
+                    type: account.type ?? site.type,
+                    accountId: account.accountId ?? account.account_id,
+                    enabled: account.enabled,
                     url: site.url,
                     cfClearance: site.cfClearance || site.cf_clearance,
                     cfClearanceEnv: site.cfClearanceEnv || site.cf_clearance_env,
                     userId: account.userId || account.user_id,
                     name: account.name,
-                    accessTokenEnv: account.accessTokenEnv || account.access_token_env,
-                    accessToken: account.accessToken || account.access_token,
+                    accessTokenEnv: account.accessTokenEnv || account.access_token_env || account.session_token_env,
+                    accessToken: account.accessToken || account.access_token || account.session_token,
                     session: account.session,
                     loginUser: account.loginUser || account.login_username,
                     loginPass: account.loginPass || account.login_password
@@ -250,9 +265,9 @@ globalThis.AccountTable = (() => {
     function collectGrouped() {
         const grouped = new Map();
         rows.forEach(row => {
-            const key = JSON.stringify([row.url, row.cfClearance, row.cfClearanceEnv]);
+            const key = JSON.stringify([row.type, row.url, row.cfClearance, row.cfClearanceEnv]);
             if (!grouped.has(key)) grouped.set(key, {
-                url: row.url, cfClearance: row.cfClearance, cfClearanceEnv: row.cfClearanceEnv, accounts: []
+                type: row.type, url: row.url, cfClearance: row.cfClearance, cfClearanceEnv: row.cfClearanceEnv, accounts: []
             });
             const {id, url, cfClearance, cfClearanceEnv, ...account} = row;
             grouped.get(key).accounts.push({...account});
@@ -304,9 +319,26 @@ globalThis.AccountTable = (() => {
                 urlCell.appendChild(link);
             }
             appendCell(row, account.name || '未备注');
-            appendCell(row, account.userId);
+            appendCell(row, account.type === 'vyceai' ? 'VyceAI' : account.userId);
             appendCell(row, account.accessTokenEnv, 'account-variable-cell');
             appendCell(row, account.accessToken ? '已填写，待同步' : '未填写新令牌');
+            const enabledCell = appendCell(row, '', 'account-enabled-cell');
+            const toggle = document.createElement('button');
+            toggle.type = 'button';
+            toggle.className = 'account-enabled-toggle';
+            toggle.textContent = account.enabled ? '已启用' : '已停用';
+            toggle.setAttribute('role', 'switch');
+            toggle.setAttribute('aria-checked', String(account.enabled));
+            toggle.setAttribute('aria-label', '启用签到：' + (account.name || account.userId || 'VyceAI'));
+            toggle.addEventListener('click', () => {
+                account.enabled = !account.enabled;
+                render();
+                status('启停状态已更新到草稿；点击「保存到 GitHub」后定时签到生效，已有 Secret 会保留。');
+                document.dispatchEvent(new CustomEvent('account-draft-changed'));
+                body.querySelector('tr[data-account-id="' + account.id + '"] [role="switch"]')?.focus();
+            });
+            enabledCell.appendChild(toggle);
+            row.classList.toggle('account-is-disabled', !account.enabled);
             const actions = appendCell(row, '', 'account-row-actions');
             for (const [label, action, className] of [
                 ['编辑', () => openEditor(account.id), 'btn btn-secondary btn-xs'],
@@ -326,17 +358,17 @@ globalThis.AccountTable = (() => {
             const row = document.createElement('tr');
             const cell = appendCell(row, rows.length ? '没有匹配的账号，试试其他关键词。'
                 : '暂无账号，点击「添加账号」或先「从 GitHub 加载」。', 'account-empty');
-            cell.colSpan = 7;
+            cell.colSpan = 8;
             body.appendChild(row);
         }
-        element('account-count').textContent = `${rows.length} 个账号 · ${new Set(rows.map(row => row.url)).size} 个站点`;
+        element('account-count').textContent = `${rows.length} 个账号 · ${rows.filter(row => row.enabled).length} 启用 / ${rows.filter(row => !row.enabled).length} 停用 · ${new Set(rows.map(row => row.url)).size} 个站点`;
         element('account-page-info').textContent = `第 ${page} / ${pages} 页 · 匹配 ${filtered.length} 个账号`;
         element('account-page-previous').disabled = page <= 1;
         element('account-page-next').disabled = page >= pages;
     }
 
     function openEditor(identifier = null) {
-        const row = identifier === null ? normalize({}) : rows.find(account => account.id === identifier);
+        const row = identifier === null ? normalize({accountId: 'vyceai-' + crypto.randomUUID()}) : rows.find(account => account.id === identifier);
         if (!row) {
             status('该账号已不存在，请重新加载列表', true);
             return;
@@ -345,6 +377,8 @@ globalThis.AccountTable = (() => {
         editorRevision += 1;
         element('account-editor-form').reset();
         fieldNames.forEach(field => { element('account-field-' + field).value = row[field]; });
+        element('account-field-enabled').checked = row.enabled;
+        syncEditorType();
         element('account-editor-title').textContent = identifier === null ? '添加账号' : '编辑账号';
         element('account-editor-error').textContent = '';
         element('account-editor-import-status').textContent = '';
@@ -374,7 +408,9 @@ globalThis.AccountTable = (() => {
                     + '\n其他账号不会改变，仍需点击「保存到表格」。是否继续？')) return false;
         openEditor(existing?.id ?? null);
         fieldNames.forEach(field => { element('account-field-' + field).value = account[field] || existing?.[field] || ''; });
-        element('account-editor-advanced').open = fieldNames.slice(5).some(field => account[field]);
+        element('account-field-enabled').checked = account.enabled;
+        syncEditorType();
+        element('account-editor-advanced').open = account.type !== 'vyceai' && fieldNames.slice(5, 10).some(field => account[field]);
         element('account-editor-import-status').textContent = `已从${sourceName}填入一个账号；仅当前弹窗，检查后点击「保存到表格」。`;
         element('account-field-url').focus();
         return true;
@@ -415,6 +451,7 @@ globalThis.AccountTable = (() => {
     function saveEditor(event) {
         event.preventDefault();
         const values = Object.fromEntries(fieldNames.map(field => [field, element('account-field-' + field).value]));
+        values.enabled = element('account-field-enabled').checked;
         try {
             saveAccount(values, editingId);
             element('account-editor').close();
@@ -432,7 +469,7 @@ globalThis.AccountTable = (() => {
         render();
         status(rows.length
             ? '已从草稿删除账号；保存到 GitHub 时需选择「替换账号列表」，不会删除已有 Secrets。'
-            : '当前草稿已清空；GitHub 同步至少需要保留一个账号。');
+            : '当前草稿已清空；保存到 GitHub 时使用「替换账号列表」同步删除。');
         document.dispatchEvent(new CustomEvent('account-draft-changed'));
         return true;
     }
@@ -440,6 +477,7 @@ globalThis.AccountTable = (() => {
     function init() {
         if (initialized) return;
         initialized = true;
+        element('account-field-type').addEventListener('change', syncEditorType);
         element('account-add').addEventListener('click', () => openEditor());
         element('account-editor-paste').addEventListener('click', pasteIntoEditor);
         element('account-editor-import-fill').addEventListener('click', importEditorJSON);
@@ -460,6 +498,20 @@ globalThis.AccountTable = (() => {
         element('account-page-previous').addEventListener('click', () => { page -= 1; render(); });
         element('account-page-next').addEventListener('click', () => { page += 1; render(); });
         render();
+    }
+
+    function syncEditorType() {
+        const vyceai = element('account-field-type').value === 'vyceai';
+        element('account-field-userId').required = !vyceai;
+        element('account-field-userId').closest('.form-group').hidden = vyceai;
+        element('account-editor-advanced').hidden = vyceai;
+        element('account-token-label').textContent = vyceai ? 'VyceAI SessionToken' : '系统访问令牌';
+        element('account-token-help').textContent = vyceai
+            ? '登录 VyceAI 后，在浏览器 Cookie 中复制 session 的值。每日北京时间 08:00 重置奖励。'
+            : '登录站点 → 个人设置 → 系统访问令牌。留空保留已有 Secret。';
+        element('account-field-accessTokenEnv').placeholder = vyceai ? 'VYCEAI_SESSION_TOKEN_ACCOUNT1' : 'NEWAPI_TOKEN_ACCOUNT1';
+        if (vyceai && !element('account-field-url').value.trim()) element('account-field-url').value = 'https://vyceai.com';
+        if (vyceai && !element('account-field-accountId').value) element('account-field-accountId').value = 'vyceai-' + crypto.randomUUID();
     }
 
     return {init, openEditor, fillEditor, pasteIntoEditor, parseAccounts, importAccounts,

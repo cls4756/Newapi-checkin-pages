@@ -340,7 +340,8 @@ function collectGithubSavePayload() {
     if (sites.some(site => site.accounts.some(account => account.session || account.loginUser || account.loginPass))) {
         throw new Error('GitHub 账号配置仅支持系统令牌和 CF 变量；请使用旧版 JSON / WebDAV 保存 Session 或登录信息，或先清除这些旧版字段。');
     }
-    const {publicAccounts: accounts, secrets} = AccountExports.build(sites);
+    const {publicAccounts: accounts, secrets} = AccountExports.build(sites, {
+        allowEmpty: document.getElementById('github-save-mode').value === 'replace'});
     const includeEnv = document.getElementById('github-include-env').checked;
     const syncSecrets = document.getElementById('github-sync-secrets').checked;
     const syncLocal = document.getElementById('github-sync-local').checked;

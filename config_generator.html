@@ -39,7 +39,7 @@
         }
 
         .container {
-            max-width: 800px;
+            max-width: 1480px;
             margin: 0 auto;
             background: rgba(255, 255, 255, 0.04);
             border: 1px solid rgba(255, 255, 255, 0.08);
@@ -4059,7 +4059,7 @@
                 </div>
                 <div class="account-table-scroll" tabindex="0" role="region" aria-label="账号列表，可横向滚动">
                     <table class="account-table">
-                        <thead><tr><th scope="col">序号</th><th scope="col">站点</th><th scope="col">备注</th><th scope="col">用户 ID</th><th scope="col">令牌变量名</th><th scope="col">新令牌</th><th scope="col">操作</th></tr></thead>
+                        <thead><tr><th scope="col">序号</th><th scope="col">站点</th><th scope="col">备注</th><th scope="col">用户 / 类型</th><th scope="col">令牌变量名</th><th scope="col">新令牌</th><th scope="col">签到</th><th scope="col">操作</th></tr></thead>
                         <tbody id="account-table-body"></tbody>
                     </table>
                 </div>
@@ -4101,6 +4101,15 @@
                         <p id="account-editor-import-status" class="account-editor-import-status" role="status"></p>
                     </div>
                     <div class="account-editor-grid">
+                        <div class="form-group">
+                            <label for="account-field-type">站点类型</label>
+                            <select id="account-field-type"><option value="newapi">NewAPI</option><option value="vyceai">VyceAI 每日奖励</option></select>
+                            <input id="account-field-accountId" type="hidden">
+                        </div>
+                        <div class="form-group">
+                            <label class="account-enabled-label" for="account-field-enabled"><input id="account-field-enabled" type="checkbox" checked>启用签到</label>
+                            <small>停用后保留账号和 Secret，定时任务跳过该账号。</small>
+                        </div>
                         <div class="form-group account-editor-wide">
                             <label for="account-field-url">站点 URL <span class="required">*</span></label>
                             <input id="account-field-url" type="text" placeholder="https://api.example.com" required>
@@ -4120,9 +4129,9 @@
                             <small>只填变量名。新增时留空会分配独立名称，编辑时留空保留原名称。</small>
                         </div>
                         <div class="form-group account-editor-wide">
-                            <label for="account-field-accessToken">系统访问令牌</label>
+                            <label id="account-token-label" for="account-field-accessToken">系统访问令牌</label>
                             <input id="account-field-accessToken" type="password" autocomplete="off" placeholder="新增或更新时填写，留空保留远端已有 Secret">
-                            <small>登录站点 → 个人设置 → 系统访问令牌。表格只显示填写状态，不展示令牌。</small>
+                            <small id="account-token-help">登录站点 → 个人设置 → 系统访问令牌。表格只显示填写状态，不展示令牌。</small>
                         </div>
                     </div>
                     <details id="account-editor-advanced">
@@ -4945,16 +4954,18 @@
         function loadFlatData(flatAccounts) {
             const grouped = Object.create(null);
             flatAccounts.forEach(acc => {
-                const key = (acc.url || '') + '|' + (acc.cfClearance || acc.cf_clearance || '')
+                const key = (acc.type || 'newapi') + '|' + (acc.url || '') + '|' + (acc.cfClearance || acc.cf_clearance || '')
                     + '|' + (acc.cfClearanceEnv || acc.cf_clearance_env || '');
                 if (!grouped[key]) {
-                    grouped[key] = { url: acc.url || '', cfClearance: acc.cfClearance || acc.cf_clearance || '',
+                    grouped[key] = { type: acc.type || 'newapi', url: acc.url || '', cfClearance: acc.cfClearance || acc.cf_clearance || '',
                         cfClearanceEnv: acc.cfClearanceEnv || acc.cf_clearance_env || '', accounts: [] };
                 }
                 grouped[key].accounts.push({
+                    type: acc.type || 'newapi', accountId: acc.accountId || acc.account_id || '',
+                    enabled: acc.enabled === undefined ? true : acc.enabled,
                     session: acc.session || '',
-                    accessToken: acc.accessToken || acc.access_token || '',
-                    accessTokenEnv: acc.accessTokenEnv || acc.access_token_env || '',
+                    accessToken: acc.accessToken || acc.access_token || acc.session_token || '',
+                    accessTokenEnv: acc.accessTokenEnv || acc.access_token_env || acc.session_token_env || '',
                     userId: acc.userId || acc.user_id || '',
                     name: acc.name || '',
                     loginUser: acc.loginUser || acc.login_username || '',
