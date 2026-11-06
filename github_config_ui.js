@@ -9,15 +9,10 @@ let githubLoadPending = null;
 let githubLoadAfterDialog = false;
 let githubAccountsLoaded = false;
 let githubAccountsDirty = false;
+let githubPendingOperation = null;
 const githubSettingFields = ['github-repository', 'github-branch', 'github-save-mode',
     'github-sync-secrets', 'github-include-env', 'github-sync-local', 'github-remember-token',
     'github-pushplus-mode', 'github-pushplus-token', 'github-pushplus-only-failure', 'github-tokenbom-pat'];
-
-function toggleGithubSync() {
-    const section = document.getElementById('github-section');
-    section.style.display = section.style.display === 'none' ? 'block' : 'none';
-    if (section.style.display === 'block') section.scrollIntoView({behavior: 'smooth', block: 'start'});
-}
 
 function restoreGithubTarget() {
     const local = usesLocalGithubGateway();
@@ -26,8 +21,6 @@ function restoreGithubTarget() {
     if (!local) localCheckbox.checked = false;
     const localRow = document.getElementById('github-local-option');
     if (localRow) localRow.hidden = !local;
-    const importRow = document.getElementById('github-env-import-row');
-    if (importRow) importRow.hidden = local;
     updatePushplusControls();
     try {
         const target = GitHubSettings.read();
@@ -59,15 +52,17 @@ function rememberGithubTarget(repository, branch) {
     return '';
 }
 
-function openGithubSettings() {
+function openGithubSettings(tab = 'github') {
     const dialog = document.getElementById('github-settings-dialog');
-    if (githubBusy || dialog.open) return;
+    if (githubBusy) return;
+    if (dialog.open) { switchSettingsTab(tab); return; }
     githubSettingsSnapshot = captureGithubSettings();
+    captureWebdavSettings();
+    switchSettingsTab(tab);
     dialog.returnValue = '';
     document.getElementById('github-settings-status').style.display = 'none';
     dialog.showModal();
-    const locked = document.getElementById('github-remember-token').checked && !unlockedGithubToken;
-    document.getElementById(locked ? 'github-vault-password' : 'github-repository').focus();
+    document.getElementById('settings-tab-' + tab).focus();
 }
 
 function captureGithubSettings() {
@@ -89,6 +84,7 @@ function finishGithubSettings() {
         document.getElementById(id)[property] = value;
     });
     githubSettingsSnapshot = null;
+    const webdavAction = finishWebdavSettings(dialog.returnValue);
     updatePushplusControls();
     try { updateGithubSettingsSummary(); } catch {}
     for (const id of ['github-token', 'github-vault-password', 'github-vault-confirm']) {
@@ -96,7 +92,11 @@ function finishGithubSettings() {
     }
     const reload = githubLoadAfterDialog && ['saved', 'unlocked'].includes(dialog.returnValue);
     githubLoadAfterDialog = false;
-    if (reload) loadFromGithub({...(githubLoadPending || {automatic: true}), preserveServiceDraft: dialog.returnValue === 'saved'});
+    const pending = dialog.returnValue === 'saved' ? githubPendingOperation : null;
+    githubPendingOperation = null;
+    if (pending) { githubLoadPending = null; pending(); }
+    else if (webdavAction) webdavAction();
+    else if (reload) loadFromGithub({...(githubLoadPending || {automatic: true}), preserveServiceDraft: dialog.returnValue === 'saved'});
     else {
         if (dialog.returnValue === 'cancel' || !dialog.returnValue) githubLoadPending = null;
         initAccountImport();
@@ -133,6 +133,9 @@ function updateGithubSettingsSummary() {
     document.getElementById('github-settings-summary').textContent =
         `${saved.repository || '尚未保存仓库设置'} · ${saved.branch || '默认分支'} · ${tokenState}` + (hasServiceDraft() ? ' · 推送 / 续期有未提交修改' : '');
     document.getElementById('github-vault-status').textContent = tokenState;
+    const lock = document.getElementById('github-pat-action');
+    lock.hidden = !unlockedGithubToken && !saved.vault;
+    lock.textContent = unlockedGithubToken ? '🔒 锁定 PAT' : '🔓 解锁 PAT';
 }
 
 async function saveGithubSettings() {
@@ -164,7 +167,7 @@ async function saveGithubSettings() {
         document.getElementById('github-token').value = '';
         updateGithubSettingsSummary();
         showGithubStatus('success', hasServiceDraft()
-            ? 'GitHub 连接设置已保存在当前浏览器；推送与续期修改暂存本页，请点击「确认并保存到 GitHub」后生效。'
+            ? 'GitHub 连接设置已保存在当前浏览器；推送与续期修改暂存本页，请点击「GitHub 同步」后生效。'
             : '设置已保存到当前浏览器，刷新后恢复。没有向 GitHub 提交文件或上传凭证。');
         savedSuccessfully = true;
         githubLoadAfterDialog = reload;
@@ -188,7 +191,7 @@ async function unlockGithubToken() {
     const revision = githubLockRevision;
     let unlockedSuccessfully = false;
     setGithubBusy(true);
-    const password = document.getElementById('github-vault-password');
+    const password = document.getElementById('github-unlock-password');
     try {
         const saved = GitHubSettings.read();
         if (!saved.vault) throw new Error('尚未加密保存 PAT，请先填写 PAT 和自设密码保存设置');
@@ -199,18 +202,30 @@ async function unlockGithubToken() {
         updateGithubSettingsSummary();
         showGithubStatus('success', 'PAT 已解锁，本页面的 GitHub 操作可直接使用；刷新、离开页面或立即锁定后需重新解锁。');
         unlockedSuccessfully = true;
-        githubLoadAfterDialog = Boolean(githubLoadPending) || !githubAccountsLoaded;
     } catch (error) {
         unlockedGithubToken = '';
         try { updateGithubSettingsSummary(); } catch {}
         showGithubStatus('error', error.message);
     } finally {
         password.value = '';
-        document.getElementById('github-vault-confirm').value = '';
         githubSettingsBusy = false;
         setGithubBusy(false);
-        if (unlockedSuccessfully) closeGithubSettings('unlocked');
+        if (unlockedSuccessfully) document.getElementById('github-unlock-dialog').close('unlocked');
     }
+}
+
+function openGithubUnlock() {
+    const dialog = document.getElementById('github-unlock-dialog');
+    if (githubBusy || githubSettingsBusy || dialog.open) return;
+    dialog.returnValue = '';
+    document.getElementById('github-unlock-password').value = '';
+    document.getElementById('github-unlock-status').style.display = 'none';
+    dialog.showModal();
+}
+
+function toggleGithubLock() {
+    if (unlockedGithubToken) lockGithubToken();
+    else openGithubUnlock();
 }
 
 function lockGithubToken() {
@@ -258,7 +273,8 @@ function githubTarget() {
     const {repository, branch} = preferences;
     const token = document.getElementById('github-token').value.trim() || unlockedGithubToken;
     if (!token) {
-        openGithubSettings();
+        if (GitHubSettings.read().vault) openGithubUnlock();
+        else openGithubSettings();
         throw new Error('请先解锁已保存的 PAT，或在设置中填写 GitHub Personal Access Token');
     }
     GitHubSettings.validateToken(token);
@@ -268,6 +284,7 @@ function githubTarget() {
 function showGithubStatus(type, message) {
     const ids = ['github-status', 'github-table-status'];
     if (document.getElementById('github-settings-dialog').open) ids.push('github-settings-status');
+    if (document.getElementById('github-unlock-dialog').open) ids.push('github-unlock-status');
     for (const id of ids) {
         const status = document.getElementById(id);
         status.className = 'cloud-status ' + type;
@@ -280,6 +297,7 @@ function setGithubBusy(busy) {
     githubBusy = busy;
     if (busy) {
         githubDisabledControls = Array.from(document.querySelectorAll('.content input, .content select, .content textarea, .content button'))
+            .filter(element => !element.closest('#github-env-dialog, #github-unlock-dialog'))
             .map(element => [element, element.disabled]);
         githubDisabledControls.forEach(([element]) => { element.disabled = true; });
     } else {
@@ -314,12 +332,7 @@ async function githubRequest(payload) {
             throw new Error('请通过 HTTPS 访问，并确认浏览器 GitHub 模块已正确部署');
         }
         return globalThis.GitHubBrowserConfig.handle(payload, {
-            readEnvTemplate: async () => {
-                const file = document.getElementById('github-env-import')?.files?.[0];
-                if (!file) return '';
-                if (file.size > 1024 * 1024) throw new Error('首次导入的 .env 不能超过 1 MB');
-                return file.text();
-            }
+            readEnvTemplate: requestGithubEnvTemplate
         });
     }
     const response = await fetch('/github-config', {
@@ -405,8 +418,9 @@ async function loadFromGithub({automatic = false, preserveServiceDraft = false} 
         target = githubTarget();
     } catch (error) {
         githubLoadPending = {automatic};
+        githubPendingOperation = () => loadFromGithub({automatic, preserveServiceDraft});
         showGithubStatus('error', error.message);
-        if (!document.getElementById('github-settings-dialog').open) initAccountImport();
+        if (!document.getElementById('github-settings-dialog').open && !document.getElementById('github-unlock-dialog').open) initAccountImport();
         return;
     }
     githubLoadPending = null;
@@ -448,22 +462,13 @@ async function saveToGithub() {
         payload = collectGithubSavePayload();
         if (!payload) return;
     } catch (error) {
+        if (document.getElementById('github-settings-dialog').open || document.getElementById('github-unlock-dialog').open) {
+            githubPendingOperation = saveToGithub;
+        }
         showGithubStatus('error', error.message);
         return;
     }
-    let confirmation = `将向 ${payload.repository} 的 ${payload.branch || '默认'} 分支提交 ${payload.accounts.length} 个表单账号，并更新两个工作流。`;
-    confirmation += payload.mode === 'replace' ? '\n替换模式：远端不在表单中的账号将被删除。' : '\n合并模式：保留远端其他账号。';
-    if (payload.include_env) confirmation += usesLocalGithubGateway()
-        ? '\n⚠️ 明文 .env 将进入 Git 历史；首次可能包含本地 .env 的全部凭证，仅私有仓库允许此操作。'
-        : '\n⚠️ 明文 .env 将进入私有仓库的 Git 历史；首次以你选择的 .env 文件或本次填写的账号令牌创建，不会发布到 Pages。';
-    if (payload.sync_local) confirmation += '\n⚠️ 同时覆盖本地公开配置和工作流，并更新本地 .env。';
-    if (payload.sync_secrets) confirmation += `\n加密上传 ${Object.keys(payload.secrets).length} 个填写的凭证；留空保留已有 Secrets。`;
-    if (payload.notifications?.pushplus.mode === 'enable') confirmation += '\n启用 PushPlus：向两个工作流添加任务结果推送步骤，发送签到步骤状态和 Actions 日志链接，不发送账号凭证；Token 仅加密保存到 PUSHPLUS_TOKEN Secret。'
-        + (payload.notifications.pushplus.only_failure ? '\n仅在签到步骤失败时推送。' : '\n签到步骤成功或失败均推送。');
-    if (payload.notifications?.pushplus.mode === 'disable') confirmation += '\n关闭由本页面添加的 PushPlus 工作流步骤，保留已有 PUSHPLUS_TOKEN Secret 和其他通知设置。';
-    if (payload.sync_secrets) confirmation += '\n⚠️ 文件和 Secrets 不能作为一个原子事务；部分失败会标为未全部完成，已写入部分不会自动回滚。';
-    if (payload.secrets.TOKENBOM_SECRETS_PAT) confirmation += '\n将续期 PAT 加密保存为 TOKENBOM_SECRETS_PAT，供后续 TokenBom 任务更新 refreshToken。';
-    if (!confirm(confirmation + '\n\n确认保存？')) return;
+    if (payload.mode === 'replace' && !confirm(`将替换 ${payload.repository} 的账号列表，远端不在表格中的账号将被删除。确认继续？`)) return;
     setGithubBusy(true);
     document.getElementById('github-commit-link').hidden = true;
     showGithubStatus('info', '正在检查配置、提交 GitHub 文件并同步 Secrets，请勿关闭页面…');
@@ -501,7 +506,7 @@ async function saveToGithub() {
         link.href = result.commit_url;
         link.hidden = result.changed_files.length === 0;
     } catch (error) {
-        showGithubStatus('error', error instanceof TypeError ? githubConnectionError() : error.message);
+        showGithubStatus(error.name === 'AbortError' ? 'info' : 'error', error instanceof TypeError ? githubConnectionError() : error.message);
     } finally {
         document.getElementById('github-token').value = '';
         const envImport = document.getElementById('github-env-import');
@@ -523,7 +528,25 @@ document.addEventListener('DOMContentLoaded', () => {
     dialog.addEventListener('close', finishGithubSettings);
     document.getElementById('github-settings-form').addEventListener('submit', event => {
         event.preventDefault();
-        saveGithubSettings();
+        saveSyncSettings();
+    });
+    const unlock = document.getElementById('github-unlock-dialog');
+    document.getElementById('github-unlock-form').addEventListener('submit', event => {
+        event.preventDefault();
+        unlockGithubToken();
+    });
+    unlock.addEventListener('close', () => {
+        document.getElementById('github-unlock-password').value = '';
+        const pending = githubPendingOperation;
+        githubPendingOperation = null;
+        githubLoadPending = null;
+        if (unlock.returnValue === 'unlocked') {
+            if (pending) pending();
+            else if (!githubAccountsLoaded) refreshGithubAccounts();
+        } else {
+            githubLockRevision += 1;
+            initAccountImport();
+        }
     });
 });
 window.addEventListener('pagehide', lockGithubToken);

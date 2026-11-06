@@ -14,6 +14,7 @@ PUBLIC_FILES = (
     'account_exports.js',
     'github_config_ui.js',
     'github_settings.js',
+    'sync_settings_ui.js',
     'github_browser_config.js',
     'vendor/libsodium.js',
     'vendor/libsodium-wrappers.js',

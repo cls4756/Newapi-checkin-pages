@@ -4023,13 +4023,6 @@
         </style>
 
         <div class="content">
-            <div id="cors-notice" class="cors-notice" style="display: none;">
-                <span class="cors-icon">⚠️</span>
-                <div>
-                    <strong id="cors-notice-title">当前页面以网络协议运行，云端同步可能受 CORS 跨域限制。</strong><br>
-                    <span id="cors-notice-tips" style="color: #94a3b8;">如遇连接失败，推荐优先在云端同步中启用 <strong>CORS 代理</strong>。</span>
-                </div>
-            </div>
             <section class="account-table-panel" aria-labelledby="account-table-title">
                 <div class="account-table-heading">
                     <div>
@@ -4037,12 +4030,18 @@
                         <p id="account-count" aria-live="polite">0 个账号 · 0 个站点</p>
                     </div>
                     <div class="btn-group">
+                        <button type="button" class="btn btn-success" onclick="saveToGithub()">🐙 GitHub 同步</button>
+                        <button type="button" class="btn btn-secondary" onclick="syncWebdav()">☁️ WebDAV 同步</button>
+                        <button type="button" class="btn btn-secondary" id="github-pat-action" onclick="toggleGithubLock()" hidden>🔓 解锁 PAT</button>
                         <button type="button" class="btn btn-secondary" onclick="refreshGithubAccounts()">🔄 刷新账号</button>
                         <button type="button" class="btn btn-secondary" onclick="openGithubSettings()">⚙️ 设置</button>
                         <button type="button" class="btn btn-primary" id="account-add">➕ 添加账号</button>
                     </div>
                 </div>
                 <p id="github-settings-summary" class="account-table-help" role="status">尚未保存 GitHub 设置</p>
+                <div id="github-status" hidden></div>
+                <a id="github-commit-link" target="_blank" rel="noopener noreferrer" hidden>查看 GitHub 提交 ↗</a>
+                <div id="cloud-status" class="cloud-status" role="status" aria-live="polite"></div>
                 <div id="github-table-status" class="cloud-status" role="status" aria-live="polite"></div>
                 <div class="account-table-toolbar">
                     <label class="account-search-field">
@@ -4168,30 +4167,18 @@
                 </form>
             </dialog>
 
-            <div class="btn-group">
-                <button class="btn btn-success" onclick="generateConfig()">✨ 生成配置</button>
-            </div>
-
-            <div class="btn-group" style="margin-top: 12px;">
-                <button class="btn btn-secondary" onclick="saveToLocal()">💾 保存浏览器草稿</button>
-                <button class="btn btn-secondary" onclick="loadFromLocal()">📂 加载浏览器草稿</button>
-                <button class="btn btn-secondary btn-cloud" onclick="toggleGithubSync()">🐙 GitHub 同步</button>
-                <button class="btn btn-secondary btn-cloud" onclick="toggleCloudSync()">☁️ WebDAV 同步（旧流程）</button>
-                <button class="btn btn-secondary btn-import" onclick="toggleImport()">📋 批量导入 JSON</button>
-                <button class="btn btn-secondary" onclick="window.open('dashboard.html', '_blank', 'noopener')">📊 实时签到查询</button>
-                <button class="btn btn-secondary btn-clear" onclick="clearLocal()">🗑️ 清除浏览器草稿</button>
-            </div>
-
-            <dialog id="github-settings-dialog" class="account-editor github-section github-settings-dialog" aria-labelledby="github-settings-title" aria-describedby="github-settings-description">
-                <form id="github-settings-form" novalidate autocomplete="off">
-                    <div class="account-editor-heading github-settings-heading">
-                        <div>
-                            <h2 id="github-settings-title">⚙️ 签到设置</h2>
-                            <p id="github-settings-description">连接设置保存在当前浏览器；推送和续期修改需保存到 GitHub 后生效。</p>
-                        </div>
-                        <button type="button" class="btn btn-secondary btn-xs" onclick="closeGithubSettings()" aria-label="关闭 GitHub 设置">✕</button>
-                    </div>
-                    <div class="github-settings-body">
+<dialog id="github-settings-dialog" class="account-editor github-section github-settings-dialog" aria-labelledby="github-settings-title" aria-describedby="github-settings-description">
+    <form id="github-settings-form" novalidate autocomplete="off">
+        <div class="account-editor-heading github-settings-heading">
+            <div><h2 id="github-settings-title">⚙️ 签到设置</h2><p id="github-settings-description">连接、通知和数据工具按分类管理。</p></div>
+            <button type="button" class="btn btn-secondary btn-xs" onclick="closeGithubSettings()" aria-label="关闭设置">✕</button>
+        </div>
+        <div class="settings-tabs" role="tablist" aria-label="设置分类"><button type="button" id="settings-tab-github" role="tab" aria-controls="settings-panel-github" aria-selected="true" tabindex="0" onclick="switchSettingsTab('github')">GitHub</button>
+            <button type="button" id="settings-tab-services" role="tab" aria-controls="settings-panel-services" aria-selected="false" tabindex="-1" onclick="switchSettingsTab('services')">通知与续期</button>
+            <button type="button" id="settings-tab-webdav" role="tab" aria-controls="settings-panel-webdav" aria-selected="false" tabindex="-1" onclick="switchSettingsTab('webdav')">WebDAV</button>
+            <button type="button" id="settings-tab-tools" role="tab" aria-controls="settings-panel-tools" aria-selected="false" tabindex="-1" onclick="switchSettingsTab('tools')">数据工具</button></div>
+        <div class="github-settings-body">
+<section id="settings-panel-github" role="tabpanel" aria-labelledby="settings-tab-github">
                         <div class="cloud-fields">
                             <div class="form-group">
                                 <label for="github-repository">签到配置仓库 <span class="required">*</span></label>
@@ -4232,16 +4219,28 @@
                                 </div>
                                 <div class="form-group">
                                     <label for="github-vault-confirm">确认密码（首次保存或更改密码时）</label>
-                                    <input type="password" id="github-vault-confirm" placeholder="仅解锁时无需填写" autocomplete="off">
+                                    <input type="password" id="github-vault-confirm" placeholder="重复新密码" autocomplete="off">
                                 </div>
                             </div>
                             <small>浏览器只保存密文，不保存密码；忘记密码需删除密文并重新填写 PAT。解锁后的可信页面仍能使用 PAT，请仅在自己的设备和可信页面操作。GitHub 设置不包含账号草稿或 WebDAV 密码。</small>
                             <div class="btn-group">
-                                <button type="button" class="btn btn-primary btn-sm" onclick="unlockGithubToken()">🔓 解锁 PAT</button>
-                                <button type="button" class="btn btn-secondary btn-sm" onclick="lockGithubToken()">🔒 立即锁定</button>
                                 <button type="button" class="btn btn-secondary btn-sm" onclick="forgetGithubToken()">删除已保存的 PAT</button>
                             </div>
                         </div>
+<button type="button" class="btn btn-secondary btn-sm" onclick="clearGithubSettings()">清除 GitHub 设置</button>                <div class="tips">
+                    <h4>🔒 安全与同步说明</h4>
+                    <ul>
+                        <li>在账号的「系统访问令牌」输入框中填写需要新增或更新的令牌；不写入公开账号 JSON。旧 Session 和登录密码不在此功能的同步范围内。</li>
+                        <li>GitHub 文件通过一次 commit 更新；Secrets 是独立 API，不能组成跨接口原子事务。部分失败会标为「保存未全部完成」并保留当前草稿，已写入部分不会自动回滚，可核对后重试。</li>
+                        <li>从 GitHub 加载只读取公开账号配置，不读取 .env，也无法读回 Secrets 的值。</li>
+                        <li>首次创建 .env 必须提供保存后全部账号的令牌，不能从已有 Actions Secrets 反向生成。缺少令牌会在写入任何文件或 Secrets 前停止。</li>
+                        <li>不开启 .env 托管时，GitHub 只修改三个公开文件；开启后才修改第四个文件 .env。不要为此把 .env 从默认忽略规则中移除。</li>
+                        <li>GitHub Pages 页面可能公开，但没有 PAT 的访客不能读取或修改你的私有配置。只使用你信任的页面，不要把 PAT 写入网页源码。</li>
+                        <li>请使用项目的 Pages 工作流发布白名单静态文件；不要从仓库根目录直接发布，.env 和账号配置不属于网站产物。</li>
+                    </ul>
+                </div>
+</section>
+<section id="settings-panel-services" role="tabpanel" aria-labelledby="settings-tab-services" hidden>
                 <h4>📨 结果推送 · PushPlus</h4>
                 <p class="account-table-help">保存后由签到工作流直接调用 PushPlus，推送签到步骤成功 / 失败状态和 Actions 日志链接，不发送账号令牌或完整日志。这里配置的是任务级结果，不是逐账号余额或签到明细。</p>
                 <div class="form-group">
@@ -4270,61 +4269,24 @@
                     <input type="password" id="github-tokenbom-pat" autocomplete="off" spellcheck="false" placeholder="已有 TOKENBOM_SECRETS_PAT 时留空保留">
                     <small>仅授权私有签到仓库、具有 Secrets 读写权限的 GitHub PAT。保存为 TOKENBOM_SECRETS_PAT，用于将轮换后的 refreshToken 加密写回原 Secret；不写入账号 JSON、.env 或浏览器存储。</small>
                 </div>
-                        <p class="account-table-help">推送和续期修改仅暂存本页；关闭设置后，点击「确认并保存到 GitHub」才会生效。</p>
-                        <small>首次保存或切换仓库 / 分支后自动读取账号；账号修改需在「GitHub 同步」中确认保存。提交明文 .env 和覆盖本地文件仍需每次确认。</small>
-                        <div class="btn-group">
-                            <button type="button" class="btn btn-secondary btn-sm" onclick="clearGithubSettings()">清除 GitHub 设置</button>
-                        </div>
-                    </div>
-                    <div class="github-settings-footer">
-                        <div id="github-settings-status" class="cloud-status" role="status" aria-live="polite"></div>
-                        <div class="account-editor-actions">
-                            <button type="button" class="btn btn-secondary" onclick="closeGithubSettings()">取消</button>
-                            <button type="submit" class="btn btn-success">💾 保存设置</button>
-                        </div>
-                    </div>
-                </form>
-            </dialog>
-
-            <div id="github-section" class="cloud-section github-section" style="display: none;">
-                <h3>🐙 GitHub 同步</h3>
-                <p>可直接通过 GitHub Pages 访问，随时修改账号，无需运行本地服务。浏览器直连 GitHub API，一次同步账号和两个工作流，可选创建 / 更新 Secrets 及私有仓库的 .env，不经过第三方代理。</p>
-                <button type="button" class="btn btn-secondary btn-sm" onclick="openGithubSettings()">⚙️ 同步、推送与续期设置</button>
-                <div class="form-group" id="github-env-import-row">
-                    <label for="github-env-import">首次托管 .env：选择文件（可选）</label>
-                    <input type="file" id="github-env-import" autocomplete="off">
-                    <small>只有勾选托管并确认保存后才读取。远端没有 .env 时使用此文件；不选择则仅用表单令牌创建。已有远端 .env 时保留其内容，此文件不生效。内容不显示、不保存到浏览器存储。</small>
-                </div>
-                <div class="tips">
-                    <h4>🔒 安全与同步说明</h4>
-                    <ul>
-                        <li>在账号的「系统访问令牌」输入框中填写需要新增或更新的令牌；不写入公开账号 JSON。旧 Session 和登录密码不在此功能的同步范围内。</li>
-                        <li>GitHub 文件通过一次 commit 更新；Secrets 是独立 API，不能组成跨接口原子事务。部分失败会标为「保存未全部完成」并保留当前草稿，已写入部分不会自动回滚，可核对后重试。</li>
-                        <li>从 GitHub 加载只读取公开账号配置，不读取 .env，也无法读回 Secrets 的值。</li>
-                        <li>首次创建 .env 必须提供保存后全部账号的令牌，不能从已有 Actions Secrets 反向生成。缺少令牌会在写入任何文件或 Secrets 前停止。</li>
-                        <li>不开启 .env 托管时，GitHub 只修改三个公开文件；开启后才修改第四个文件 .env。不要为此把 .env 从默认忽略规则中移除。</li>
-                        <li>GitHub Pages 页面可能公开，但没有 PAT 的访客不能读取或修改你的私有配置。只使用你信任的页面，不要把 PAT 写入网页源码。</li>
-                        <li>请使用项目的 Pages 工作流发布白名单静态文件；不要从仓库根目录直接发布，.env 和账号配置不属于网站产物。</li>
-                    </ul>
-                </div>
-                <div id="github-status" class="cloud-status" role="status" aria-live="polite"></div>
-                <a id="github-commit-link" target="_blank" rel="noopener noreferrer" hidden>查看 GitHub 提交 ↗</a>
-                <div class="btn-group" style="margin-top: 16px;">
-                    <button class="btn btn-secondary btn-sm github-operation" onclick="loadFromGithub()">📥 从 GitHub 加载</button>
-                    <button class="btn btn-success btn-sm github-operation" onclick="saveToGithub()">🐙 确认并保存到 GitHub</button>
-                    <button class="btn btn-secondary btn-sm" onclick="toggleGithubSync()">收起</button>
+                        <p class="account-table-help">推送和续期修改仅暂存本页；保存设置后，点击「GitHub 同步」才会生效。</p>
+</section>
+<section id="settings-panel-webdav" role="tabpanel" aria-labelledby="settings-tab-webdav" hidden>            <div id="cloud-section" class="cloud-section" style="display: block;">
+                <h3>WebDAV 连接</h3>            <div id="cors-notice" class="cors-notice" style="display: none;">
+                <span class="cors-icon">⚠️</span>
+                <div>
+                    <strong id="cors-notice-title">当前页面以网络协议运行，云端同步可能受 CORS 跨域限制。</strong><br>
+                    <span id="cors-notice-tips" style="color: #94a3b8;">如遇连接失败，推荐优先在云端同步中启用 <strong>CORS 代理</strong>。</span>
                 </div>
             </div>
 
-            <div id="cloud-section" class="cloud-section" style="display: none;">
-                <h3>☁️ WebDAV 同步（旧流程）</h3>
                 <p style="color: #94a3b8; font-size: 14px; margin-bottom: 16px;">将旧版账号 JSON 保存到云盘/NAS。主程序优先读取仓库账号文件；仅默认文件不存在或为空、且未指定 NEWAPI_CONFIG_FILE 时才使用 CONFIG_URL。使用仓库账号的 Actions 请通过 GitHub 同步修改。</p>
 
                 <div class="cloud-presets">
-                    <button class="cloud-preset-btn" onclick="applyCloudPreset('jianguoyun')" id="preset-jianguoyun">🥜 坚果云</button>
-                    <button class="cloud-preset-btn" onclick="applyCloudPreset('synology')" id="preset-synology">🏠 群晖 NAS</button>
-                    <button class="cloud-preset-btn" onclick="applyCloudPreset('nextcloud')" id="preset-nextcloud">☁️ NextCloud</button>
-                    <button class="cloud-preset-btn" onclick="applyCloudPreset('custom')" id="preset-custom">⚙️ 自定义</button>
+                    <button type="button" class="cloud-preset-btn" onclick="applyCloudPreset('jianguoyun')" id="preset-jianguoyun">🥜 坚果云</button>
+                    <button type="button" class="cloud-preset-btn" onclick="applyCloudPreset('synology')" id="preset-synology">🏠 群晖 NAS</button>
+                    <button type="button" class="cloud-preset-btn" onclick="applyCloudPreset('nextcloud')" id="preset-nextcloud">☁️ NextCloud</button>
+                    <button type="button" class="cloud-preset-btn" onclick="applyCloudPreset('custom')" id="preset-custom">⚙️ 自定义</button>
                 </div>
 
                 <div class="cloud-fields">
@@ -4387,7 +4349,10 @@
                     </div>
                 </div>
 
-                <div id="cloud-status" class="cloud-status"></div>
+                <label class="account-enabled-label"><input type="checkbox" id="cloud-remember-credentials">记住 WebDAV 密码 / 令牌（明文）</label>
+                <small>连接设置保存到当前浏览器。未勾选时密码仅在本页使用，重新打开后需在此填写。同步会用当前表格覆盖目标 JSON 文件。</small>
+                <div id="cloud-settings-status" class="cloud-status" role="status"></div>
+                <div id="cloud-usage-details"></div>
 
                 <div id="cloud-saved-config" style="display: none; margin-top: 12px; padding: 12px 16px; background: rgba(16,185,129,0.08); border: 1px solid rgba(52,211,153,0.15); border-radius: 10px; font-size: 13px; color: #047857;">
                     <span style="color: #059669;">☁️ 已保存的云端配置：</span>
@@ -4396,15 +4361,12 @@
                     <span id="cloud-saved-username" style="color: #94a3b8;"></span>
                     <span style="color: #cbd5e1;">|</span>
                     <span id="cloud-saved-auth" style="color: #94a3b8;"></span>
-                    <button class="btn btn-danger btn-xs" style="margin-left: 8px; padding: 4px 10px; font-size: 12px;" onclick="clearCloudConfig()">清除</button>
+                    <button type="button" class="btn btn-danger btn-xs" style="margin-left: 8px; padding: 4px 10px; font-size: 12px;" onclick="clearCloudConfig()">清除</button>
                 </div>
 
                 <div class="btn-group" style="margin-top: 16px;">
-                    <button class="btn btn-success btn-sm" onclick="saveToCloud()">☁️ 保存到云端</button>
-                    <button class="btn btn-secondary btn-sm" onclick="loadFromCloud()">📥 从云端加载</button>
-                    <button class="btn btn-secondary btn-sm" onclick="testCloudConnection()">🔗 测试连接</button>
-                    <button class="btn btn-secondary btn-sm" onclick="saveCloudConfigToLocal(true)">💾 记住 WebDAV 连接信息</button>
-                    <button class="btn btn-secondary btn-sm" onclick="toggleCloudSync()">收起</button>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="loadFromCloud()">📥 从云端加载</button>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="testCloudConnection()">🔗 测试连接</button>
                 </div>
 
                 <div class="tips" style="margin-top: 16px;">
@@ -4462,9 +4424,15 @@
                     </div>
                 </div>
                 </div>
-            </div>
-
-            <div id="import-section" class="import-section" style="display: none;">
+</section>
+<section id="settings-panel-tools" role="tabpanel" aria-labelledby="settings-tab-tools" hidden><div class="btn-group">
+    <button type="button" class="btn btn-secondary" onclick="generateConfig()">✨ 生成配置</button>
+    <button type="button" class="btn btn-secondary" onclick="saveToLocal()">💾 保存浏览器草稿</button>
+    <button type="button" class="btn btn-secondary" onclick="loadFromLocal()">📂 加载浏览器草稿</button>
+    <button type="button" class="btn btn-secondary" onclick="toggleImport()">📋 批量导入 JSON</button>
+    <button type="button" class="btn btn-secondary" onclick="window.open('dashboard.html', '_blank', 'noopener')">📊 实时签到查询</button>
+    <button type="button" class="btn btn-secondary" onclick="clearLocal()">🗑️ 清除浏览器草稿</button>
+</div>            <div id="import-section" class="import-section" style="display: none;">
                 <h3>📋 批量导入 JSON 配置</h3>
                 <p style="color: #94a3b8; font-size: 14px; margin-bottom: 16px;">支持平铺账号数组或按站点分组的配置。合并时留空字段保留已有值，新账号留空变量名会分配独立名称。导入只更新表格草稿，不自动保存到浏览器或 GitHub；单账号预填请使用「添加账号」。</p>
                 <label class="account-import-mode">
@@ -4485,8 +4453,8 @@
   }
 ]'></textarea>
                 <div class="btn-group" style="margin-top: 12px;">
-                    <button class="btn btn-primary btn-sm" onclick="importJSON()">✅ 确认导入</button>
-                    <button class="btn btn-secondary btn-sm" onclick="toggleImport()">取消</button>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="importJSON()">✅ 确认导入</button>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="toggleImport()">取消</button>
                 </div>
             </div>
 
@@ -4514,7 +4482,7 @@
                               background: linear-gradient(135deg, rgba(37,99,235,0.9), rgba(14,165,233,0.9)); color: #fff;
                               text-decoration: none; font-weight: 600; font-size: 14px; cursor: grab;"
                        title="把我拖到浏览器收藏夹">🧷 抓取签到配置</a>
-                    <button class="btn btn-secondary btn-sm" onclick="copyBookmarklet()">📋 复制书签代码</button>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="copyBookmarklet()">📋 复制书签代码</button>
                 </div>
                 <small style="color: #94a3b8; line-height: 1.6; display: block;">
                     使用方法：① 把蓝色按钮拖到收藏夹栏（或点「复制书签代码」手动新建书签，网址粘贴代码）；
@@ -4527,11 +4495,11 @@
                 <p id="bookmark-status" class="account-table-status" role="status"></p>
                 <p id="bookmark-pending-info" class="account-table-help">没有待确认的旧版书签数据。新书签请从添加账号弹窗中粘贴。</p>
                 <div style="margin-top: 8px; display: flex; gap: 10px; flex-wrap: wrap;">
-                    <button class="btn btn-secondary btn-sm" id="bookmark-fill-btn" hidden onclick="fillBookmarkPending()">📋 预填下一个待确认账号</button>
-                    <button class="btn btn-secondary btn-sm" id="bookmark-merge-btn" hidden onclick="mergeBookmarkPending()">合并全部待确认账号到草稿</button>
-                    <button class="btn btn-secondary btn-sm" id="bookmark-clear-btn" hidden onclick="clearBookmarkPending()">🧹 清空当前待确认数据</button>
-                    <button class="btn btn-secondary btn-sm" onclick="restoreLegacyBookmarkCache()">恢复旧版缓存到待确认</button>
-                    <button class="btn btn-secondary btn-sm" onclick="clearLegacyBookmarkCache()">清除旧版浏览器抓取缓存</button>
+                    <button type="button" class="btn btn-secondary btn-sm" id="bookmark-fill-btn" hidden onclick="fillBookmarkPending()">📋 预填下一个待确认账号</button>
+                    <button type="button" class="btn btn-secondary btn-sm" id="bookmark-merge-btn" hidden onclick="mergeBookmarkPending()">合并全部待确认账号到草稿</button>
+                    <button type="button" class="btn btn-secondary btn-sm" id="bookmark-clear-btn" hidden onclick="clearBookmarkPending()">🧹 清空当前待确认数据</button>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="restoreLegacyBookmarkCache()">恢复旧版缓存到待确认</button>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="clearLegacyBookmarkCache()">清除旧版浏览器抓取缓存</button>
                 </div>
             </div>
 
@@ -4539,28 +4507,28 @@
                 <h3>📋 生成的配置</h3>
 
                 <div class="tabs">
-                    <button class="tab active" data-format="repository" onclick="switchTab('repository')">仓库配置（不含凭证，推荐）</button>
-                    <button class="tab" data-format="json" onclick="switchTab('json')">旧版 JSON（可能含凭证）</button>
-                    <button class="tab" data-format="simple" onclick="switchTab('simple')">旧版简单格式</button>
+                    <button type="button" class="tab active" data-format="repository" onclick="switchTab('repository')">仓库配置（不含凭证，推荐）</button>
+                    <button type="button" class="tab" data-format="json" onclick="switchTab('json')">旧版 JSON（可能含凭证）</button>
+                    <button type="button" class="tab" data-format="simple" onclick="switchTab('simple')">旧版简单格式</button>
                 </div>
 
                 <div id="repository-tab" class="tab-content active">
                     <div class="code-block">
-                        <button class="btn btn-secondary copy-btn" onclick="copyToClipboard('repository', this)">复制</button>
+                        <button type="button" class="btn btn-secondary copy-btn" onclick="copyToClipboard('repository', this)">复制</button>
                         <pre id="repository-output"></pre>
                     </div>
                 </div>
 
                 <div id="json-tab" class="tab-content">
                     <div class="code-block">
-                        <button class="btn btn-secondary copy-btn" onclick="copyToClipboard('json', this)">复制</button>
+                        <button type="button" class="btn btn-secondary copy-btn" onclick="copyToClipboard('json', this)">复制</button>
                         <pre id="json-output"></pre>
                     </div>
                 </div>
 
                 <div id="simple-tab" class="tab-content">
                     <div class="code-block">
-                        <button class="btn btn-secondary copy-btn" onclick="copyToClipboard('simple', this)">复制</button>
+                        <button type="button" class="btn btn-secondary copy-btn" onclick="copyToClipboard('simple', this)">复制</button>
                         <pre id="simple-output"></pre>
                     </div>
                 </div>
@@ -4574,7 +4542,41 @@
                         <li><strong>安全提醒：</strong>旧版 JSON / 简单格式可能含真实令牌或 Cookie，不能提交到仓库；令牌失效后只更新对应 Secret / .env 变量</li>
                     </ul>
                 </div>
+            </div></section></div>
+        <div class="github-settings-footer">
+            <div id="github-settings-status" class="cloud-status" role="status" aria-live="polite"></div>
+            <div class="account-editor-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeGithubSettings()">关闭</button>
+                <button id="settings-save" type="submit" class="btn btn-success">💾 保存设置</button>
             </div>
+        </div>
+    </form>
+</dialog>
+<dialog id="github-unlock-dialog" class="account-editor compact-dialog" aria-labelledby="github-unlock-title">
+    <form id="github-unlock-form" autocomplete="off">
+        <h2 id="github-unlock-title">解锁 PAT</h2>
+        <p>输入密码后继续刚才的操作。</p>
+        <label for="github-unlock-password">解锁密码</label>
+        <input type="password" id="github-unlock-password" autocomplete="current-password" required autofocus>
+        <div id="github-unlock-status" class="cloud-status" role="status"></div>
+        <div class="account-editor-actions">
+            <button type="button" class="btn btn-secondary" onclick="document.getElementById('github-unlock-dialog').close('cancel')">取消</button>
+            <button type="submit" class="btn btn-primary">解锁并继续</button>
+        </div>
+    </form>
+</dialog>
+<dialog id="github-env-dialog" class="account-editor compact-dialog" aria-labelledby="github-env-title">
+    <h2 id="github-env-title">首次创建 .env</h2>
+    <p>远端尚无 .env。选择已有文件导入，或用表格中填写的令牌创建。文件只用于本次同步。</p>
+    <label for="github-env-import">选择 .env 文件（最大 1 MB）</label>
+    <input type="file" id="github-env-import" autocomplete="off">
+    <div id="github-env-status" class="cloud-status" role="status"></div>
+    <div class="account-editor-actions">
+        <button type="button" class="btn btn-secondary" onclick="document.getElementById('github-env-dialog').close('cancel')">取消同步</button>
+        <button type="button" class="btn btn-secondary" onclick="finishGithubEnvImport(false)">用表格令牌创建</button>
+        <button type="button" class="btn btn-primary" onclick="finishGithubEnvImport(true)">导入并同步</button>
+    </div>
+</dialog>
         </div>
 
         <div class="footer">
@@ -5032,6 +5034,7 @@
                 document.getElementById('cloud-username').value = config.username || '';
                 document.getElementById('cloud-password').value = config.password || '';
                 document.getElementById('cloud-token').value = config.token || '';
+                document.getElementById('cloud-remember-credentials').checked = Boolean(config.password || config.token);
                 document.getElementById('cloud-filename').value = config.filename || 'newapi-config.json';
                 document.getElementById('cors-proxy-enabled').checked = config.corsProxyEnabled || false;
                 document.getElementById('cors-proxy-url').value = config.corsProxyUrl || '';
@@ -5065,16 +5068,6 @@
             } catch (e) {}
         }
 
-        function toggleCloudSync() {
-            const section = document.getElementById('cloud-section');
-            if (section.style.display === 'none') {
-                section.style.display = 'block';
-                loadCloudConfigFromLocal();
-                document.getElementById('cloud-section').scrollIntoView({ behavior: 'smooth' });
-            } else {
-                section.style.display = 'none';
-            }
-        }
 
         function applyCloudPreset(preset) {
             document.querySelectorAll('.cloud-preset-btn').forEach(b => b.classList.remove('active'));
@@ -5151,6 +5144,7 @@
                 localStorage.setItem(CLOUD_STORAGE_KEY, JSON.stringify(config));
                 showCloudStatus('success', 'WebDAV 连接信息已保存在当前浏览器，下次打开自动恢复');
                 updateSavedConfigDisplay(config);
+                return true;
             } catch {
                 showCloudStatus('error', '连接信息未保存：浏览器存储不可用或空间不足');
             }
@@ -5454,10 +5448,12 @@
         }
 
         function showCloudStatus(type, message) {
-            const status = document.getElementById('cloud-status');
-            status.className = 'cloud-status ' + type;
-            status.textContent = message;
-            status.style.display = 'block';
+            for (const id of ['cloud-status', 'cloud-settings-status']) {
+                const status = document.getElementById(id);
+                status.className = 'cloud-status ' + type;
+                status.textContent = message;
+                status.style.display = 'block';
+            }
         }
 
         function hideCloudStatus() {
@@ -5489,7 +5485,6 @@
                 updated_at: new Date().toISOString()
             };
 
-            if (!confirm('将覆盖 WebDAV 目标配置文件，包含本次填写的明文账号凭证；未填写的远端账号和其他设置不会保留。确认保存？')) return;
             setGithubBusy(true);
             showCloudStatus('info', '正在保存到云端...');
 
@@ -5515,7 +5510,6 @@
                         authStr = `token:${token}`;
                     }
 
-                    generateConfig();
                     updateCloudUsageTip(configUrl, authStr);
                 } else if (resp.status === 401) {
                     showCloudStatus('error', '❌ 认证失败：用户名或密码不正确');
@@ -5663,7 +5657,7 @@
         }
 
         function updateCloudUsageTip(configUrl, authStr) {
-            const resultTips = document.querySelector('#result .tips');
+            const resultTips = document.getElementById('cloud-usage-details');
             if (!resultTips) return;
 
             const existingCloudTip = resultTips.querySelector('.cloud-usage-tip');
@@ -5679,8 +5673,8 @@
                 <h4 style="color: #059669; margin-bottom: 12px;">☁️ 云端配置使用方法：</h4>
                 <ul style="margin-left: 20px; color: #94a3b8;">
                     <li style="margin-bottom: 8px;">在 GitHub 仓库 <code>Settings → Secrets</code> 中添加：</li>
-                    <li style="margin-bottom: 8px;"><code>CONFIG_URL</code> = <span style="color:#059669;"><span class="cloud-tip-url"></span></span> <button class="btn btn-secondary btn-xs" style="padding:4px 10px;font-size:12px;" onclick="copySecretValue('config_url', this)">复制</button></li>
-                    <li style="margin-bottom: 8px;"><code>CONFIG_AUTH</code> = <span style="color:#059669;"><span class="cloud-tip-auth"></span></span> <button class="btn btn-secondary btn-xs" style="padding:4px 10px;font-size:12px;" onclick="copySecretValue('config_auth', this)">复制</button></li>
+                    <li style="margin-bottom: 8px;"><code>CONFIG_URL</code> = <span style="color:#059669;"><span class="cloud-tip-url"></span></span> <button type="button" class="btn btn-secondary btn-xs" style="padding:4px 10px;font-size:12px;" onclick="copySecretValue('config_url', this)">复制</button></li>
+                    <li style="margin-bottom: 8px;"><code>CONFIG_AUTH</code> = <span style="color:#059669;"><span class="cloud-tip-auth"></span></span> <button type="button" class="btn btn-secondary btn-xs" style="padding:4px 10px;font-size:12px;" onclick="copySecretValue('config_auth', this)">复制</button></li>
                     <li style="margin-bottom: 8px;">只有未指定配置文件且默认 accounts.config.json 缺失或为空时，签到脚本才尝试 CONFIG_URL；存在项目账号时此云端文件不会生效</li>
                 </ul>
             `;
@@ -5748,6 +5742,7 @@
     <script src="account_exports.js"></script>
     <script src="github_settings.js"></script>
     <script src="github_config_ui.js"></script>
+    <script src="sync_settings_ui.js"></script>
 <!-- CORS 代理选择弹窗 -->
     <div class="cors-modal-overlay hidden" id="cors-modal-overlay" onclick="closeCorsProxyPickerOutside(event)">
         <div class="cors-modal" id="cors-modal">

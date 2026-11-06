@@ -72,6 +72,22 @@ html[data-theme="dark"] .github-vault { border-color: #475569; }
     box-shadow: 0 24px 80px #0004;
 }
 .account-editor::backdrop { background: #0f172a99; }
+.account-editor.compact-dialog { width: min(460px, calc(100vw - 32px)); }
+.compact-dialog p { margin: 12px 0 18px; color: #64748b; line-height: 1.6; }
+.compact-dialog h2 { font-size: 21px; }
+.compact-dialog label { display: block; margin-bottom: 8px; }
+.compact-dialog input { padding: 12px; border: 1px solid #cbd5e1; border-radius: 8px; font: inherit; }
+.compact-dialog .account-editor-actions { flex-wrap: wrap; }
+.settings-tabs { display: flex; flex-shrink: 0; gap: 4px; padding: 8px 20px; border-bottom: 1px solid #e2e8f0; overflow-x: auto; }
+.settings-tabs button { flex: 1 0 auto; padding: 12px 10px; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.settings-tabs button[aria-selected="true"] { color: #0369a1; background: #e0f2fe; font-weight: 600; }
+.settings-tabs button:focus-visible { outline: 2px solid #0284c7; outline-offset: -2px; }
+#github-status[hidden], #github-pat-action[hidden] { display: none !important; }
+#settings-panel-webdav .cloud-section { margin: 0; padding: 0; border: 0; background: transparent; }
+.github-settings-body [role="tabpanel"] { min-width: 0; }
+html[data-theme="dark"] .settings-tabs { border-color: #334155; }
+html[data-theme="dark"] .settings-tabs button[aria-selected="true"] { background: #0c4a6e; color: #bae6fd; }
+html[data-theme="dark"] .compact-dialog p { color: #94a3b8; }
 .account-editor.github-settings-dialog { padding: 0; }
 #github-settings-form { display: flex; flex-direction: column; max-height: calc(100dvh - 44px); }
 .github-settings-heading { flex-shrink: 0; flex-wrap: nowrap; align-items: flex-start; padding: 20px 24px; border-bottom: 1px solid #e2e8f0; }
@@ -150,6 +166,10 @@ html[data-theme="dark"] .account-editor small { color: #94a3b8; }
 html[data-theme="dark"] .account-table-status { color: #7dd3fc; }
 @media (max-width: 640px) {
     .account-table-panel { padding: 16px; }
+    .account-table-heading > .btn-group { display: grid; grid-template-columns: 1fr 1fr; width: 100%; gap: 8px; margin: 0; }
+    .account-table-heading > .btn-group .btn { min-width: 0; padding: 10px 8px; }
+    .settings-tabs { gap: 2px; padding: 8px 12px; }
+    .settings-tabs button { flex: 1 1 0; min-width: 0; padding: 10px 3px; font-size: 13px; white-space: nowrap; }
     .account-editor { padding: 18px; }
     .account-editor-grid { grid-template-columns: 1fr; }
     .github-settings-body .cloud-fields { grid-template-columns: 1fr; }

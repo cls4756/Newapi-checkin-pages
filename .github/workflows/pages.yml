@@ -11,6 +11,7 @@ on:
       - 'account_exports.js'
       - 'github_config_ui.js'
       - 'github_settings.js'
+      - 'sync_settings_ui.js'
       - 'github_browser_config.js'
       - 'vendor/**'
       - 'tests/**'
@@ -47,6 +48,7 @@ jobs:
             /account_exports.js
             /github_config_ui.js
             /github_settings.js
+            /sync_settings_ui.js
             /github_browser_config.js
             /vendor/
             /tests/
