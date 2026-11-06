@@ -144,15 +144,20 @@ async function runTest(name, callback) {
 
 async function main() {
 
-    await runTest('TokenBom saves refreshToken and renewal PAT only as Secrets with stable merge and pause support', async () => {
+    await runTest('TokenBom automatically seals the current GitHub PAT with stable merge and pause support', async () => {
         const {api, context, service, payload} = await createService();
         const bom = {type: 'tokenbom', url: 'https://tokenbom.example', account_id: 'stable', name: 'Synthetic', refresh_token_env: 'BOM_REFRESH'};
-        await assert.rejects(() => service.handle({...payload, accounts: [bom], secrets: {BOM_REFRESH: 'synthetic-refresh'}}), /TOKENBOM_SECRETS_PAT/);
+        await assert.rejects(() => service.handle({...payload, accounts: [bom], secrets: {}}), /BOM_REFRESH/);
         assert.equal(mutations(api).length, 0);
-        const credentials = {BOM_REFRESH: 'synthetic-refresh', TOKENBOM_SECRETS_PAT: 'synthetic-renewal-pat'};
-        const saved = await service.handle({...payload, accounts: [bom], secrets: credentials});
+        const provided = {BOM_REFRESH: 'synthetic-refresh'};
+        const credentials = {...provided, TOKENBOM_SECRETS_PAT: payload.token};
+        const saved = await service.handle({...payload, token: ' ' + payload.token + ' ', accounts: [bom], secrets: provided});
+        assert.deepEqual(provided, {BOM_REFRESH: 'synthetic-refresh'});
+        assert.equal(saved.complete, true);
+        assert.deepEqual([...saved.saved_secrets].sort(), Object.keys(credentials).sort());
         assert.equal(saved.accounts.length, 2);
         for (const call of api.calls.filter(call => call.method === 'PUT')) {
+            assert.deepEqual(Object.keys(call.payload).sort(), ['encrypted_value', 'key_id']);
             const value = context.sodium.crypto_box_seal_open(new Uint8Array(Buffer.from(call.payload.encrypted_value, 'base64')),
                 api.pair.publicKey, api.pair.privateKey, 'text');
             assert.equal(value, credentials[call.endpoint.split('/').at(-1)]);
@@ -162,14 +167,81 @@ async function main() {
             assert.ok(api.files.get(path).includes('TOKENBOM_SECRETS_PAT: ' + String.fromCharCode(36) + '{{ secrets.TOKENBOM_SECRETS_PAT }}'));
             assert.ok(api.files.get(path).includes("cron: '10 0 * * *'"));
         }
-        const publicText = JSON.stringify(saved) + [...api.files.values()].join('');
+        const publicText = JSON.stringify(saved) + [...api.files.values()].join('')
+            + JSON.stringify(mutations(api).map(call => call.payload));
         for (const value of Object.values(credentials)) assert.ok(!publicText.includes(value));
         assert.ok(!api.readPaths.includes('.env'));
+        const uploads = api.calls.filter(call => call.method === 'PUT').length;
         const paused = await service.handle({...payload, accounts: [{...bom, enabled: false}], secrets: {}});
         assert.equal(paused.accounts[1].enabled, false);
         const resumed = await service.handle({...payload, accounts: [{...bom, name: 'Updated', enabled: true}], secrets: {}});
         assert.equal(resumed.accounts.length, 2);
         assert.equal(resumed.accounts[1].name, 'Updated');
+        assert.equal(api.calls.filter(call => call.method === 'PUT').length, uploads);
+    });
+    await runTest('TokenBom uses an explicit renewal PAT and preserves it when the connection PAT changes', async () => {
+        for (const alreadyConfigured of [false, true]) {
+            const {api, context, service, payload} = await createService();
+            const bom = {type: 'tokenbom', url: 'https://tokenbom.example', account_id: 'stable', refresh_token_env: 'BOM_REFRESH'};
+            if (alreadyConfigured) api.secrets.add('TOKENBOM_SECRETS_PAT');
+            const result = await service.handle({...payload, accounts: [bom], secrets: {
+                BOM_REFRESH: 'synthetic-refresh', TOKENBOM_SECRETS_PAT: 'synthetic-dedicated-pat'}});
+            const upload = api.calls.find(call => call.method === 'PUT' && call.endpoint === 'actions/secrets/TOKENBOM_SECRETS_PAT');
+            assert.ok(upload);
+            const value = context.sodium.crypto_box_seal_open(new Uint8Array(Buffer.from(upload.payload.encrypted_value, 'base64')),
+                api.pair.publicKey, api.pair.privateKey, 'text');
+            assert.equal(value, 'synthetic-dedicated-pat');
+            assert.ok(!JSON.stringify(result).includes(value));
+            assert.ok(![...api.files.values()].join('').includes(value));
+            api.calls.length = 0;
+            const preserved = await service.handle({...payload, token: 'synthetic-new-connection-pat', accounts: [bom], secrets: {}});
+            assert.equal(preserved.complete, true);
+            assert.equal(preserved.saved_secrets.length, 0);
+            assert.equal(mutations(api).length, 0);
+        }
+    });
+    await runTest('TokenBom fallback includes merged remote accounts but requires an active account and Secret sync', async () => {
+        const bom = {type: 'tokenbom', url: 'https://tokenbom.example', account_id: 'stable', refresh_token_env: 'BOM_REFRESH'};
+        const {api, service, payload} = await createService();
+        api.files.set('accounts.config.json', JSON.stringify([bom]));
+        api.secrets.add('BOM_REFRESH');
+        const merged = await service.handle(payload);
+        assert.equal(merged.accounts.length, 2);
+        assert.ok(merged.saved_secrets.includes('TOKENBOM_SECRETS_PAT'));
+        for (const accounts of [[account()], [{...bom, enabled: false}]]) {
+            const {api, service, payload} = await createService();
+            api.secrets.add('NEW_TOKEN');
+            const result = await service.handle({...payload, accounts, secrets: {}});
+            assert.equal(result.complete, true);
+            assert.ok(!api.secrets.has('TOKENBOM_SECRETS_PAT'));
+            assert.ok(!api.calls.some(call => call.method === 'PUT'));
+        }
+        const blocked = await createService();
+        await assert.rejects(() => blocked.service.handle({...blocked.payload, accounts: [bom],
+            secrets: {BOM_REFRESH: 'synthetic-refresh'}, sync_secrets: false}), /必须同步 Secrets/);
+        assert.equal(mutations(blocked.api).length, 0);
+    });
+    await runTest('Failed automatic renewal PAT upload reports partial save without credentials and can be retried', async () => {
+        const {api, context, service, payload} = await createService();
+        const bom = {type: 'tokenbom', url: 'https://tokenbom.example', account_id: 'stable', refresh_token_env: 'BOM_REFRESH'};
+        api.failedSecrets.add('TOKENBOM_SECRETS_PAT');
+        const failed = await service.handle({...payload, accounts: [bom], secrets: {BOM_REFRESH: 'synthetic-refresh'}});
+        assert.equal(failed.complete, false);
+        assert.deepEqual([...failed.failed_secrets], ['TOKENBOM_SECRETS_PAT']);
+        for (const value of [payload.token, 'synthetic-refresh', 'synthetic-sensitive-upstream-error']) {
+            assert.ok(!JSON.stringify(failed).includes(value));
+        }
+        assert.ok(!api.secrets.has('TOKENBOM_SECRETS_PAT'));
+        api.failedSecrets.clear();
+        api.calls.length = 0;
+        const retried = await service.handle({...payload, accounts: [bom], secrets: {}});
+        assert.equal(retried.complete, true);
+        assert.deepEqual([...retried.saved_secrets], ['TOKENBOM_SECRETS_PAT']);
+        assert.equal(api.commitCount, 1);
+        const upload = api.calls.find(call => call.method === 'PUT');
+        const value = context.sodium.crypto_box_seal_open(new Uint8Array(Buffer.from(upload.payload.encrypted_value, 'base64')),
+            api.pair.publicKey, api.pair.privateKey, 'text');
+        assert.equal(value, payload.token);
     });
     await runTest('TokenBom rejects public repositories, mixed credentials and duplicate names before writes', async () => {
         const bom = {type: 'tokenbom', url: 'https://tokenbom.example', account_id: 'stable', refresh_token_env: 'BOM_REFRESH'};
@@ -177,7 +249,7 @@ async function main() {
             const {api, service, payload} = await createService();
             Object.assign(api, changes);
             await assert.rejects(() => service.handle({...payload, accounts: [bom], secrets: {
-                BOM_REFRESH: 'synthetic-refresh', TOKENBOM_SECRETS_PAT: 'synthetic-renewal-pat'}}));
+                BOM_REFRESH: 'synthetic-refresh'}}));
             assert.equal(mutations(api).length, 0);
         }
         const {service} = await createService();
@@ -188,13 +260,19 @@ async function main() {
         assert.throws(() => service.validateAccounts([bom, {...bom, account_id: 'second'}]), /冲突/);
     });
     await runTest('TokenBom renewal PAT is excluded from explicitly hosted synthetic env content', async () => {
-        const {api, service, payload} = await createService();
-        await service.handle({...payload, accounts: [{type: 'tokenbom', url: 'https://tokenbom.example',
-            account_id: 'stable', refresh_token_env: 'BOM_REFRESH'}],
-            secrets: {BOM_REFRESH: 'synthetic-refresh', TOKENBOM_SECRETS_PAT: 'synthetic-renewal-pat'},
-            include_env: true, confirm_plaintext_env: true}, {readEnvTemplate: async () => 'OLD_TOKEN=synthetic-old\n'});
-        assert.ok(!api.files.get('.env').includes('TOKENBOM_SECRETS_PAT'));
-        assert.ok(!api.files.get('.env').includes('synthetic-renewal-pat'));
+        for (const explicit of [false, true]) {
+            const {api, service, payload} = await createService();
+            const result = await service.handle({...payload, accounts: [{type: 'tokenbom', url: 'https://tokenbom.example',
+                account_id: 'stable', refresh_token_env: 'BOM_REFRESH'}],
+                secrets: {BOM_REFRESH: 'synthetic-refresh', ...(explicit ? {TOKENBOM_SECRETS_PAT: 'synthetic-renewal-pat'} : {})},
+                include_env: true, confirm_plaintext_env: true}, {readEnvTemplate: async () => 'OLD_TOKEN=synthetic-old\n'});
+            assert.ok(result.saved_secrets.includes('TOKENBOM_SECRETS_PAT'));
+            assert.ok(!api.files.get('.env').includes('TOKENBOM_SECRETS_PAT'));
+            for (const value of [payload.token, 'synthetic-renewal-pat']) {
+                assert.ok(![...api.files.values()].join('').includes(value));
+                assert.ok(!JSON.stringify(result).includes(value));
+            }
+        }
     });
 
 

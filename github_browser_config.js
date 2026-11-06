@@ -584,6 +584,9 @@ globalThis.GitHubBrowserConfig = (() => {
                 const existingSecrets = await client.secretNames();
                 const secretValues = {...providedValues};
                 if (automationPat) secretValues[automationSecret] = automationPat;
+                else if (activeTokenbom && !existingSecrets.has(automationSecret)) {
+                    secretValues[automationSecret] = client.token;
+                }
                 const hostedValues = envValues(files.get('.env') || '');
                 names.forEach(name => {
                     if (!existingSecrets.has(name) && !secretValues[name] && hostedValues[name]) secretValues[name] = hostedValues[name];

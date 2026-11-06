@@ -69,14 +69,16 @@ NewAPI 和 VyceAI 可混合管理，也可分别停用。旧版简单格式不�
 保存时检查全表变量名冲突，包括停用账号和其他分页中的账号；切换类型只更新未修改的默认名称。
 公开配置使用 `type: "tokenbom"`、稳定的 `account_id` 及 `refresh_token_env`，不会包含实际令牌。
 
-TokenBom 可能在刷新 accessToken 时轮换 refreshToken。首次在「设置 → 通知与续期 → TokenBom 自动续期 PAT」中，
-填写仅授权私有签到仓库、具有 **Secrets: Read and write** 权限的 GitHub Fine-grained PAT。
-这个 PAT 会加密保存为 `TOKENBOM_SECRETS_PAT`，供后续任务把轮换后的 refreshToken 写回原账号 Secret。
-默认 `GITHUB_TOKEN` 不具备修改仓库 Secrets 的权限。已有续期 Secret 时可留空；不会从 GitHub 读回凭证。
+TokenBom 可能在刷新 accessToken 时轮换 refreshToken。启用 TokenBom 后点击「GitHub 同步」，
+若仓库尚无 `TOKENBOM_SECRETS_PAT`，页面会自动使用当前连接 GitHub 的 PAT，加密保存为该 Secret，
+供后续任务把轮换后的 refreshToken 写回原账号 Secret，无需重复填写 PAT。
+当前 PAT 需要具有私有签到仓库的 **Secrets: Read and write** 权限；默认 `GITHUB_TOKEN` 不具备修改仓库 Secrets 的权限。
+已有续期 Secret 时会保留，不会因更换网页连接 PAT 而覆盖，也不会从 GitHub 读回凭证。
+如需使用独立 PAT 或更换续期凭证，可在「设置 → 通知与续期 → TokenBom 自动续期 PAT」中填写，单独填写的值优先。
 
 点击「保存设置」只保留本页的续期草稿，再点击「GitHub 同步」才加密上传并更新两个工作流映射。
-续期 PAT 不写入账号 JSON、`.env` 或浏览器存储；普通账号草稿和加密记住网页 PAT 的功能保持独立。
-启用 TokenBom 必须具备 refreshToken 和续期 PAT；停用账号允许暂缺凭证，也不会刷新或访问站点。
+续期 PAT 不写入账号 JSON、`.env` 或额外的浏览器存储；普通账号草稿和加密记住网页 PAT 的功能保持独立。
+启用 TokenBom 必须具备 refreshToken，并开启自动同步 Secrets；仅有停用的 TokenBom 账号时不会自动保存连接 PAT，也不会刷新或访问站点。
 
 配套签到程序在 GitHub Actions 中执行，先用无凭证的固定值创建 / 更新 `TOKENBOM_WRITE_CHECK` 检查写权限，
 再获取 accessToken；轮换令牌保存成功后才继续签到，临时写入失败最多尝试三次。

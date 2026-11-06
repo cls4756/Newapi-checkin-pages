@@ -4265,9 +4265,9 @@
                 </div>
                 <p id="github-pushplus-local-note" class="account-table-help" hidden>本地 /github-config 后端尚不支持此新配置；请通过 HTTPS Pages 页面设置 PushPlus。</p>
                 <div class="form-group" id="github-tokenbom-pat-row">
-                    <label for="github-tokenbom-pat">TokenBom 自动续期 PAT（首次配置或更换时填写）</label>
-                    <input type="password" id="github-tokenbom-pat" autocomplete="off" spellcheck="false" placeholder="已有 TOKENBOM_SECRETS_PAT 时留空保留">
-                    <small>仅授权私有签到仓库、具有 Secrets 读写权限的 GitHub PAT。保存为 TOKENBOM_SECRETS_PAT，用于将轮换后的 refreshToken 加密写回原 Secret；不写入账号 JSON、.env 或浏览器存储。</small>
+                    <label for="github-tokenbom-pat">TokenBom 自动续期 PAT（可选，使用独立 PAT 或更换时填写）</label>
+                    <input type="password" id="github-tokenbom-pat" autocomplete="off" spellcheck="false" placeholder="留空保留已有 Secret；首次同步自动使用当前 GitHub PAT">
+                    <small>启用 TokenBom 时，若仓库尚无 TOKENBOM_SECRETS_PAT，GitHub 同步会自动将当前连接使用的 PAT 加密保存为该 Secret，用于更新轮换后的 refreshToken；已有 Secret 则保留。也可在此指定具有私有签到仓库 Secrets 读写权限的独立 PAT。续期凭证不写入账号 JSON、.env 或额外的浏览器存储。</small>
                 </div>
                         <p class="account-table-help">推送和续期修改仅暂存本页；保存设置后，点击「GitHub 同步」才会生效。</p>
 </section>
