@@ -71,7 +71,7 @@ NewAPI 和 VyceAI 可混合管理，也可分别停用。旧版简单格式不�
 
 TokenBom 可能在刷新 accessToken 时轮换 refreshToken。启用 TokenBom 后点击「GitHub 同步」，
 若仓库尚无 `TOKENBOM_SECRETS_PAT`，页面会自动使用当前连接 GitHub 的 PAT，加密保存为该 Secret，
-供后续任务把轮换后的 refreshToken 写回原账号 Secret，无需重复填写 PAT。
+供后续任务把轮换后的 refreshToken 和 accessToken 缓存一并写回原账号 Secret，无需重复填写 PAT。
 当前 PAT 需要具有私有签到仓库的 **Secrets: Read and write** 权限；默认 `GITHUB_TOKEN` 不具备修改仓库 Secrets 的权限。
 已有续期 Secret 时会保留，不会因更换网页连接 PAT 而覆盖，也不会从 GitHub 读回凭证。
 如需使用独立 PAT 或更换续期凭证，可在「设置 → 通知与续期 → TokenBom 自动续期 PAT」中填写，单独填写的值优先。
@@ -80,11 +80,19 @@ TokenBom 可能在刷新 accessToken 时轮换 refreshToken。启用 TokenBom �
 续期 PAT 不写入账号 JSON、`.env` 或额外的浏览器存储；普通账号草稿和加密记住网页 PAT 的功能保持独立。
 启用 TokenBom 必须具备 refreshToken，并开启自动同步 Secrets；仅有停用的 TokenBom 账号时不会自动保存连接 PAT，也不会刷新或访问站点。
 
-配套签到程序在 GitHub Actions 中执行，先用无凭证的固定值创建 / 更新 `TOKENBOM_WRITE_CHECK` 检查写权限，
-再获取 accessToken；轮换令牌保存成功后才继续签到，临时写入失败最多尝试三次。
+配套签到程序在 GitHub Actions 中执行，复用有效期还剩 10 分钟以上的 accessToken，
+缓存缺失、临近过期或缓存令牌被状态接口以 401 拒绝时才刷新，每次运行最多刷新一次。
+原账号 Secret 同时保存 refreshToken 和 accessToken 的版本化 JSON 缓存，下一次任务通过原有工作流映射加载；
+旧的纯 refreshToken 无需迁移，首次成功刷新后自动建立缓存，不新增 Secret 或账号字段。
+在 Pages 编辑账号时，令牌留空保留远端缓存；重新填写 refreshToken 会替换原 Secret、清除旧缓存。
+缓存绑定站点地址，更换站点后需要填写对应站点的 refreshToken。缓存不回传网页，不写入文件、日志或构建产物。
+
+仅在需要刷新时，用无凭证的固定值创建 / 更新 `TOKENBOM_WRITE_CHECK` 检查写权限，
+再获取 accessToken；两种令牌通过一次加密 Secret 写入保存成功后才继续签到，临时写入失败最多尝试三次。
+缓存有效的运行仍检查仓库私有性，但不写 Secrets。JWT 无有效到期时间或缓存过大时仅保存 refreshToken，下一次正常刷新。
 请勿将这两个管理 Secret 名用作账号变量名。任务中断或轮换令牌持续保存失败时，需重新登录 TokenBom 并更新 refreshToken。
 不支持缺少该持久化机制的本地运行，也不要在其他脚本中并发使用同一 refreshToken。
-站点要求当天先完成 API 调用时会提示，不代为发起付费调用；结果不明确时只读复核，不重复提交签到。
+站点要求当天先完成 API 调用时会提示，不代为发起付费调用；明确成功后不额外查询状态，结果不明确时只读复核，不重复提交签到。
 
 ## 记住 GitHub 设置与 PAT
 

@@ -221,6 +221,33 @@ async function main() {
             secrets: {BOM_REFRESH: 'synthetic-refresh'}, sync_secrets: false}), /必须同步 Secrets/);
         assert.equal(mutations(blocked.api).length, 0);
     });
+    await runTest('TokenBom account edits preserve cached credentials while a new refreshToken replaces the entire Secret', async () => {
+        const {api, context, service, payload} = await createService();
+        const bom = {type: 'tokenbom', url: 'https://tokenbom.example', account_id: 'stable', refresh_token_env: 'BOM_REFRESH'};
+        // The backend owns this Secret value; the browser can only see its name.
+        api.files.set('accounts.config.json', JSON.stringify([bom]));
+        api.secrets.add('BOM_REFRESH');
+        api.secrets.add('TOKENBOM_SECRETS_PAT');
+        const preserved = await service.handle({...payload, accounts: [{...bom, name: 'Updated cache account'}], secrets: {}});
+        assert.equal(preserved.complete, true);
+        assert.equal(preserved.saved_secrets.length, 0);
+        assert.ok(!api.calls.some(call => call.method === 'PUT'));
+        assert.ok(!api.readPaths.includes('.env'));
+        api.calls.length = 0;
+        const reset = await service.handle({...payload, accounts: [bom], secrets: {BOM_REFRESH: 'synthetic-replacement-refresh'}});
+        const uploads = api.calls.filter(call => call.method === 'PUT');
+        assert.equal(uploads.length, 1);
+        assert.equal(uploads[0].endpoint, 'actions/secrets/BOM_REFRESH');
+        const value = context.sodium.crypto_box_seal_open(new Uint8Array(Buffer.from(uploads[0].payload.encrypted_value, 'base64')),
+            api.pair.publicKey, api.pair.privateKey, 'text');
+        assert.equal(value, 'synthetic-replacement-refresh');
+        assert.ok(!JSON.stringify(reset).includes(value));
+        assert.ok(![...api.files.values()].join('').includes(value));
+        for (const path of workflowFiles) {
+            assert.ok(api.files.get(path).includes('BOM_REFRESH: ' + String.fromCharCode(36) + '{{ secrets.BOM_REFRESH }}'));
+            assert.ok(api.files.get(path).includes('TOKENBOM_SECRETS_PAT: ' + String.fromCharCode(36) + '{{ secrets.TOKENBOM_SECRETS_PAT }}'));
+        }
+    });
     await runTest('Failed automatic renewal PAT upload reports partial save without credentials and can be retried', async () => {
         const {api, context, service, payload} = await createService();
         const bom = {type: 'tokenbom', url: 'https://tokenbom.example', account_id: 'stable', refresh_token_env: 'BOM_REFRESH'};

@@ -548,7 +548,7 @@ globalThis.AccountTable = (() => {
         element('account-editor-advanced').hidden = special;
         element('account-token-label').textContent = tokenbom ? 'TokenBom refreshToken' : vyceai ? 'VyceAI SessionToken' : '系统访问令牌';
         element('account-token-help').textContent = tokenbom
-            ? '登录 TokenBom 后复制 refreshToken。首次同步会自动使用当前 GitHub PAT 配置续期，已有续期 Secret 则保留；可在设置中指定独立 PAT。' : vyceai
+            ? '登录 TokenBom 后复制 refreshToken。签到会自动缓存并复用有效的 accessToken。留空保留现有令牌和缓存，重新填写会替换旧缓存。首次同步自动使用当前 GitHub PAT 配置续期。' : vyceai
             ? '登录 VyceAI 后，在浏览器 Cookie 中复制 session 的值。每日北京时间 08:00 重置奖励。'
             : '登录站点 → 个人设置 → 系统访问令牌。留空保留已有 Secret。';
         element('account-field-accessTokenEnv').placeholder = tokenbom ? 'TOKENBOM_REFRESH_TOKEN_ACCOUNT1' : vyceai ? 'VYCEAI_SESSION_TOKEN_ACCOUNT1' : 'NEWAPI_TOKEN_ACCOUNT1';
